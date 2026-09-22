@@ -1,0 +1,97 @@
+namespace ClaudipanAPI.Models.DTOs;
+
+public class LoginRequestDto
+{
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+}
+
+public class RegisterRequestDto
+{
+    public string Nombre { get; set; } = string.Empty;
+    public string? Cedula { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string? Telefono { get; set; }
+    public string? Direccion { get; set; }
+    public string? RedesSociales { get; set; }
+    public decimal? LimiteCredito { get; set; }
+}
+
+public class AuthResponseDto
+{
+    public int Id { get; set; }
+    public string Token { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+    public DateTime Expiracion { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Nombre { get; set; } = string.Empty;
+    public string? Cedula { get; set; }
+    public string Rol { get; set; } = string.Empty;
+    public string? Telefono { get; set; }
+    public string? Direccion { get; set; }
+    public string? RedesSociales { get; set; }
+    public decimal LimiteCredito { get; set; }
+    public decimal DeudaActual { get; set; }
+}
+
+public class RefreshTokenRequestDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+}
+
+public class UserProfileDto
+{
+    public int Id { get; set; }
+    public string Nombre { get; set; } = string.Empty;
+    public string? Cedula { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Rol { get; set; } = string.Empty;
+    public string? Telefono { get; set; }
+    public string? Direccion { get; set; }
+    public string? RedesSociales { get; set; }
+    public decimal LimiteCredito { get; set; }
+    public decimal DeudaActual { get; set; }
+}
+
+public class UpdateProfileDto
+{
+    public string Nombre { get; set; } = string.Empty;
+    public string? Cedula { get; set; }
+    public string? Telefono { get; set; }
+    public string? Direccion { get; set; }
+    public string? RedesSociales { get; set; }
+    public string? CurrentPassword { get; set; }
+    public string? NewPassword { get; set; }
+}
+
+public class UsuarioAdminDto
+{
+    public int Id { get; set; }
+    public string Nombre { get; set; } = string.Empty;
+    public string? Cedula { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Rol { get; set; } = string.Empty;
+    public string? Telefono { get; set; }
+    public string? Direccion { get; set; }
+    public string? RedesSociales { get; set; }
+    public decimal LimiteCredito { get; set; }
+    public decimal DeudaActual { get; set; }
+    public bool Activo { get; set; }
+    public DateTime FechaCreacion { get; set; }
+}
+
+public class UpdateUsuarioAdminDto
+{
+    public string Nombre { get; set; } = string.Empty;
+    public string? Cedula { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string Rol { get; set; } = string.Empty;
+    public string? Telefono { get; set; }
+    public string? Direccion { get; set; }
+    public string? RedesSociales { get; set; }
+    public decimal LimiteCredito { get; set; }
+    public bool Activo { get; set; } = true;
+    public string? Password { get; set; }
+}

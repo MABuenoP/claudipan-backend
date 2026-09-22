@@ -1,0 +1,20 @@
+# Auto detect text files and normalize line endings automatically
+* text=auto
+
+# Text files normalized to LF
+*.cs text diff=csharp
+*.json text
+*.xml text
+*.sql text
+*.txt text
+*.md text
+*.gitignore text
+*.gitattributes text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.dll binary
+*.exe binary
+*.pdb binary
