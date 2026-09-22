@@ -68,6 +68,26 @@ public class GastoService : IGastoService
         return ApiResponse<GastoDto>.Ok(_mapper.Map<GastoDto>(gasto), "Gasto registrado exitosamente");
     }
 
+    public async Task<ApiResponse<GastoDto>> UpdateAsync(int id, GastoCreateDto dto)
+    {
+        var gasto = await _context.Gastos
+            .Include(g => g.ResponsableUsuario)
+            .FirstOrDefaultAsync(g => g.Id == id);
+
+        if (gasto == null) return ApiResponse<GastoDto>.Fail("Gasto no encontrado");
+
+        gasto.TipoGasto = dto.TipoGasto;
+        gasto.CategoriaGasto = dto.CategoriaGasto;
+        gasto.Descripcion = dto.Descripcion;
+        gasto.Monto = dto.Monto;
+        gasto.Beneficiario = dto.Beneficiario;
+        gasto.MetodoPago = dto.MetodoPago;
+        gasto.NumeroComprobante = dto.NumeroComprobante;
+
+        await _context.SaveChangesAsync();
+        return ApiResponse<GastoDto>.Ok(_mapper.Map<GastoDto>(gasto), "Gasto actualizado exitosamente");
+    }
+
     public async Task<ApiResponse<bool>> DeleteAsync(int id)
     {
         var gasto = await _context.Gastos.FindAsync(id);

@@ -8,5 +8,6 @@ public interface IGastoService
     Task<ApiResponse<List<GastoDto>>> GetAllAsync(string? tipoGasto = null, string? categoriaGasto = null, DateTime? fechaInicio = null, DateTime? fechaFin = null);
     Task<ApiResponse<GastoDto>> GetByIdAsync(int id);
     Task<ApiResponse<GastoDto>> CreateAsync(int? usuarioId, GastoCreateDto dto);
+    Task<ApiResponse<GastoDto>> UpdateAsync(int id, GastoCreateDto dto);
     Task<ApiResponse<bool>> DeleteAsync(int id);
 }
