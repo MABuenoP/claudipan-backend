@@ -15,5 +15,7 @@ public class TransaccionDeuda
     public string Tipo { get; set; } = "Cargo_Credito"; // Cargo_Credito (fiar compra), Abono_Pago (pago de deuda)
     public string Concepto { get; set; } = string.Empty;
     public string? MetodoPagoAbono { get; set; } // Efectivo, Transferencia, Nequi, Daviplata
+    public string? ComprobanteBase64 { get; set; }
+    public string? ReferenciaPago { get; set; }
     public DateTime Fecha { get; set; } = DateTime.UtcNow;
 }

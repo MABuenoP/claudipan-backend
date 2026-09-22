@@ -21,6 +21,8 @@ public class ProduccionService : IProduccionService
 
     public async Task<ApiResponse<List<RecetaProduccionDto>>> GetAllRecetasAsync()
     {
+        await GarantizarInsumoYRecetasTransformacionAsync();
+
         var recetas = await _context.RecetasProduccion
             .Include(r => r.Producto)
             .Include(r => r.Detalles)
@@ -105,6 +107,94 @@ public class ProduccionService : IProduccionService
         return ApiResponse<bool>.Ok(true, "Receta desactivada");
     }
 
+    // --- PRE-CHEQUEO DE INSUMOS PARA GERENCIA Y ADMINISTRACIÓN ---
+    public async Task<ApiResponse<PreChequeoInsumosResponseDto>> PreChequeoInsumosAsync(PreChequeoInsumosRequestDto dto)
+    {
+        var producto = await _context.Productos.FindAsync(dto.ProductoId);
+        if (producto == null) return ApiResponse<PreChequeoInsumosResponseDto>.Fail("Producto no encontrado");
+
+        RecetaProduccion? receta = null;
+        if (dto.RecetaId.HasValue && dto.RecetaId.Value > 0)
+        {
+            receta = await _context.RecetasProduccion
+                .Include(r => r.Detalles)
+                    .ThenInclude(d => d.Insumo)
+                .FirstOrDefaultAsync(r => r.Id == dto.RecetaId.Value);
+        }
+        else
+        {
+            receta = await _context.RecetasProduccion
+                .Include(r => r.Detalles)
+                    .ThenInclude(d => d.Insumo)
+                .FirstOrDefaultAsync(r => r.ProductoId == dto.ProductoId && r.Activo);
+        }
+
+        var rendimiento = (receta != null && receta.RendimientoUnidades > 0) ? receta.RendimientoUnidades : 50;
+        var cantidadProg = dto.CantidadProgramada > 0 ? dto.CantidadProgramada : rendimiento;
+        var factorLote = (decimal)cantidadProg / rendimiento;
+
+        var response = new PreChequeoInsumosResponseDto
+        {
+            ProductoId = producto.Id,
+            ProductoNombre = producto.Nombre,
+            RecetaId = receta?.Id,
+            RecetaNombre = receta?.NombreReceta ?? $"Fórmula Estándar para {producto.Nombre}",
+            CantidadProgramada = cantidadProg,
+            RendimientoBaseReceta = rendimiento,
+            FactorLote = factorLote,
+            TieneDeficit = false
+        };
+
+        decimal costoTotal = 0m;
+        var faltantesList = new List<string>();
+
+        if (receta != null && receta.Detalles.Any())
+        {
+            foreach (var det in receta.Detalles)
+            {
+                var insumo = det.Insumo ?? await _context.Insumos.FindAsync(det.InsumoId);
+                var req = det.CantidadNecesaria * factorLote;
+                var stockActual = insumo?.StockActual ?? 0m;
+                var stockResultante = stockActual - req;
+                var esDeficit = stockResultante < 0;
+                var costoUnit = insumo?.CostoUnitario ?? 0m;
+                var costoSub = req * costoUnit;
+                costoTotal += costoSub;
+
+                if (esDeficit)
+                {
+                    response.TieneDeficit = true;
+                    faltantesList.Add($"{insumo?.Nombre ?? "Insumo"}: Requiere {req:F2} {det.UnidadMedida}, Stock {stockActual:F2} (Faltan {Math.Abs(stockResultante):F2})");
+                }
+
+                response.Insumos.Add(new ItemPreChequeoInsumoDto
+                {
+                    InsumoId = det.InsumoId,
+                    InsumoNombre = insumo?.Nombre ?? $"Insumo #{det.InsumoId}",
+                    UnidadMedida = det.UnidadMedida,
+                    CantidadRequerida = req,
+                    StockActualBodega = stockActual,
+                    StockResultante = stockResultante,
+                    EsDeficit = esDeficit,
+                    CostoUnitario = costoUnit
+                });
+            }
+        }
+        else
+        {
+            // Sin receta vinculada: estimar con costo base
+            costoTotal = cantidadProg * producto.CostoBaseProduccion;
+        }
+
+        response.CostoEstimadoTotal = costoTotal;
+        response.InsumosFaltantesResumen = faltantesList.Any() 
+            ? string.Join(" | ", faltantesList) 
+            : "Todos los insumos disponibles en bodega";
+
+        return ApiResponse<PreChequeoInsumosResponseDto>.Ok(response);
+    }
+
+    // --- ÓRDENES DE PRODUCCIÓN ---
     public async Task<ApiResponse<List<OrdenProduccionDto>>> GetAllOrdenesAsync(int? panaderoId = null, string? estado = null)
     {
         var query = _context.OrdenesProduccion
@@ -120,7 +210,15 @@ public class ProduccionService : IProduccionService
             query = query.Where(o => o.Estado == estado);
 
         var list = await query.OrderByDescending(o => o.FechaOrden).ToListAsync();
-        return ApiResponse<List<OrdenProduccionDto>>.Ok(_mapper.Map<List<OrdenProduccionDto>>(list));
+        
+        var dtos = list.Select(o =>
+        {
+            var dto = _mapper.Map<OrdenProduccionDto>(o);
+            dto.RecetaNombre = o.Receta?.NombreReceta;
+            return dto;
+        }).ToList();
+
+        return ApiResponse<List<OrdenProduccionDto>>.Ok(dtos);
     }
 
     public async Task<ApiResponse<OrdenProduccionDto>> GetOrdenByIdAsync(int id)
@@ -132,20 +230,31 @@ public class ProduccionService : IProduccionService
             .FirstOrDefaultAsync(o => o.Id == id);
 
         if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden de producción no encontrada");
-        return ApiResponse<OrdenProduccionDto>.Ok(_mapper.Map<OrdenProduccionDto>(orden));
+        var dto = _mapper.Map<OrdenProduccionDto>(orden);
+        dto.RecetaNombre = orden.Receta?.NombreReceta;
+        return ApiResponse<OrdenProduccionDto>.Ok(dto);
     }
 
-    public async Task<ApiResponse<OrdenProduccionDto>> CreateOrdenAsync(int panaderoId, OrdenProduccionCreateDto dto)
+    // SOLO GERENTE O ADMINISTRADOR CREA LA ORDEN
+    public async Task<ApiResponse<OrdenProduccionDto>> CreateOrdenAsync(int creadorUsuarioId, OrdenProduccionCreateDto dto)
     {
         var producto = await _context.Productos.FindAsync(dto.ProductoId);
         if (producto == null) return ApiResponse<OrdenProduccionDto>.Fail("Producto no encontrado");
 
         // Buscar receta asociada si no se especificó
         var recetaId = dto.RecetaId;
-        if (!recetaId.HasValue)
+        if (!recetaId.HasValue || recetaId.Value <= 0)
         {
             var receta = await _context.RecetasProduccion.FirstOrDefaultAsync(r => r.ProductoId == dto.ProductoId && r.Activo);
             if (receta != null) recetaId = receta.Id;
+        }
+
+        // Asignar panadero: si se especifica en dto, o buscar un usuario con rol Panadero, o el creador
+        int panaderoId = dto.PanaderoAsignadoId ?? 0;
+        if (panaderoId <= 0)
+        {
+            var panaderoUser = await _context.Usuarios.FirstOrDefaultAsync(u => u.Rol == "Panadero" && u.Activo);
+            panaderoId = panaderoUser?.Id ?? creadorUsuarioId;
         }
 
         var count = await _context.OrdenesProduccion.CountAsync() + 1;
@@ -155,7 +264,7 @@ public class ProduccionService : IProduccionService
             PanaderoUsuarioId = panaderoId,
             ProductoId = dto.ProductoId,
             RecetaId = recetaId,
-            CantidadProgramada = dto.CantidadProgramada,
+            CantidadProgramada = dto.CantidadProgramada > 0 ? dto.CantidadProgramada : 50,
             CantidadProducida = 0,
             CostoInsumos = 0m,
             Estado = "Pendiente",
@@ -168,26 +277,17 @@ public class ProduccionService : IProduccionService
 
         await _context.Entry(orden).Reference(o => o.PanaderoUsuario).LoadAsync();
         await _context.Entry(orden).Reference(o => o.Producto).LoadAsync();
+        if (orden.RecetaId.HasValue)
+            await _context.Entry(orden).Reference(o => o.Receta).LoadAsync();
 
-        return ApiResponse<OrdenProduccionDto>.Ok(_mapper.Map<OrdenProduccionDto>(orden), "Orden de producción creada");
+        var resultDto = _mapper.Map<OrdenProduccionDto>(orden);
+        resultDto.RecetaNombre = orden.Receta?.NombreReceta;
+
+        return ApiResponse<OrdenProduccionDto>.Ok(resultDto, "Orden de producción creada por Gerencia/Administración. Lista para que el Panadero inicie el cargue.");
     }
 
-    public async Task<ApiResponse<OrdenProduccionDto>> IniciarOrdenAsync(int id)
-    {
-        var orden = await _context.OrdenesProduccion
-            .Include(o => o.PanaderoUsuario)
-            .Include(o => o.Producto)
-            .FirstOrDefaultAsync(o => o.Id == id);
-
-        if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden no encontrada");
-
-        orden.Estado = "En_Proceso";
-        await _context.SaveChangesAsync();
-
-        return ApiResponse<OrdenProduccionDto>.Ok(_mapper.Map<OrdenProduccionDto>(orden), "Orden iniciada en producción");
-    }
-
-    public async Task<ApiResponse<OrdenProduccionDto>> EntregarProduccionAsync(int id, EntregarProduccionDto dto)
+    // --- PASO 1 (PANADERO): CARGUE DE INSUMOS & DESCUENTO (PERMITE GIRO EN NEGATIVO) ---
+    public async Task<ApiResponse<OrdenProduccionDto>> CargarInsumosAsync(int id, int panaderoId, CargarInsumosDto? dto = null)
     {
         var orden = await _context.OrdenesProduccion
             .Include(o => o.PanaderoUsuario)
@@ -198,21 +298,21 @@ public class ProduccionService : IProduccionService
             .FirstOrDefaultAsync(o => o.Id == id);
 
         if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden no encontrada");
-        if (orden.Estado == "Entregada") return ApiResponse<OrdenProduccionDto>.Fail("Esta orden ya fue entregada anteriormente");
+        if (orden.Estado != "Pendiente") return ApiResponse<OrdenProduccionDto>.Fail($"La orden ya se encuentra en estado '{orden.Estado}'");
 
-        var cantidadReal = dto.CantidadProducida > 0 ? dto.CantidadProducida : orden.CantidadProgramada;
-        orden.CantidadProducida = cantidadReal;
-        orden.FechaEntrega = DateTime.UtcNow;
-        orden.Estado = "Entregada";
-        if (!string.IsNullOrWhiteSpace(dto.Observaciones))
-            orden.Observaciones = dto.Observaciones;
+        // Si el usuario ejecutor es panadero, asignarlo a la orden
+        if (panaderoId > 0)
+        {
+            orden.PanaderoUsuarioId = panaderoId;
+        }
 
         decimal costoInsumosTotal = 0m;
+        var deficitInsumos = new List<string>();
 
-        // Descontar insumos si existe receta vinculada
+        // Descontar insumos de bodega permitiendo giro en negativo
         if (orden.Receta != null && orden.Receta.Detalles.Any())
         {
-            var factorLote = (decimal)cantidadReal / (orden.Receta.RendimientoUnidades > 0 ? orden.Receta.RendimientoUnidades : 50m);
+            var factorLote = (decimal)orden.CantidadProgramada / (orden.Receta.RendimientoUnidades > 0 ? orden.Receta.RendimientoUnidades : 50m);
 
             foreach (var det in orden.Receta.Detalles)
             {
@@ -220,9 +320,14 @@ public class ProduccionService : IProduccionService
                 var insumoDb = await _context.Insumos.FindAsync(det.InsumoId);
                 if (insumoDb != null)
                 {
+                    // Giro en negativo permitido: se descuenta el stock real necesario
                     insumoDb.StockActual -= insumoRequerido;
-                    if (insumoDb.StockActual < 0) insumoDb.StockActual = 0; // Evitar stock negativo absurdo
                     insumoDb.FechaActualizacion = DateTime.UtcNow;
+
+                    if (insumoDb.StockActual < 0)
+                    {
+                        deficitInsumos.Add($"{insumoDb.Nombre} (Saldo: {insumoDb.StockActual:F2} {insumoDb.UnidadMedida})");
+                    }
 
                     costoInsumosTotal += insumoRequerido * insumoDb.CostoUnitario;
                 }
@@ -230,23 +335,184 @@ public class ProduccionService : IProduccionService
         }
         else
         {
-            // Estimación directa con costo base del producto
-            costoInsumosTotal = cantidadReal * (orden.Producto?.CostoBaseProduccion ?? 0m);
+            costoInsumosTotal = orden.CantidadProgramada * (orden.Producto?.CostoBaseProduccion ?? 0m);
         }
 
         orden.CostoInsumos = costoInsumosTotal;
+        orden.Estado = "Preparando";
 
-        // Sumar al stock de productos listos para la venta
-        if (orden.Producto != null)
+        var notas = new List<string>();
+        if (!string.IsNullOrWhiteSpace(orden.Observaciones)) notas.Add(orden.Observaciones);
+        if (!string.IsNullOrWhiteSpace(dto?.Observaciones)) notas.Add(dto.Observaciones);
+
+        if (deficitInsumos.Any())
         {
-            orden.Producto.Stock += cantidadReal;
+            notas.Add($"[ALERTA COMPRA GERENCIA] Insumos girados en negativo: {string.Join(", ", deficitInsumos)}. Adquirir materia prima urgentemente.");
+        }
+        else
+        {
+            notas.Add("[CARGUE EXITOSO] Insumos descontados de inventario satisfactoriamente.");
+        }
+
+        orden.Observaciones = string.Join(" | ", notas);
+
+        await _context.SaveChangesAsync();
+
+        var resultDto = _mapper.Map<OrdenProduccionDto>(orden);
+        resultDto.RecetaNombre = orden.Receta?.NombreReceta;
+        resultDto.TieneInsumosFaltantes = deficitInsumos.Any();
+        resultDto.InsumosFaltantesDetalle = string.Join(", ", deficitInsumos);
+
+        return ApiResponse<OrdenProduccionDto>.Ok(resultDto, 
+            deficitInsumos.Any() 
+                ? $"Insumos cargados y descontados. ¡Atención!: {deficitInsumos.Count} insumos giraron en negativo para compra urgente de Gerencia." 
+                : "Insumos cargados exitosamente. Orden en estado: Preparando masa.");
+    }
+
+    // --- PASO 2 (PANADERO): MASA A PUNTO -> PASAR A HORNEANDO ---
+    public async Task<ApiResponse<OrdenProduccionDto>> PasarHorneandoAsync(int id, int panaderoId, PasarHorneandoDto? dto = null)
+    {
+        var orden = await _context.OrdenesProduccion
+            .Include(o => o.PanaderoUsuario)
+            .Include(o => o.Producto)
+            .Include(o => o.Receta)
+            .FirstOrDefaultAsync(o => o.Id == id);
+
+        if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden no encontrada");
+        if (orden.Estado != "Preparando" && orden.Estado != "Pendiente")
+            return ApiResponse<OrdenProduccionDto>.Fail($"La orden no está en preparación (Estado actual: '{orden.Estado}')");
+
+        orden.Estado = "Horneando";
+
+        var horaStr = DateTime.UtcNow.AddHours(-5).ToString("HH:mm"); // Hora Colombia
+        var notaHorno = $"[HORNO] Masa a punto. Entró a cámara de horneado a las {horaStr}.";
+        
+        if (!string.IsNullOrWhiteSpace(dto?.Observaciones))
+            notaHorno += $" Nota: {dto.Observaciones}";
+
+        orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
+            ? notaHorno 
+            : $"{orden.Observaciones} | {notaHorno}";
+
+        await _context.SaveChangesAsync();
+
+        var resultDto = _mapper.Map<OrdenProduccionDto>(orden);
+        resultDto.RecetaNombre = orden.Receta?.NombreReceta;
+        return ApiResponse<OrdenProduccionDto>.Ok(resultDto, "Masa a punto confirmada. La orden ha pasado a fase de HORNEANDO.");
+    }
+
+    // --- PASO 3 (PANADERO): FINALIZAR Y CUANTIFICAR CALIDAD (ÓPTIMOS, BUENAS Y MALAS CONDICIONES) ---
+    public async Task<ApiResponse<OrdenProduccionDto>> FinalizarYCuantificarAsync(int id, int panaderoId, CuantificarProduccionDto dto)
+    {
+        var orden = await _context.OrdenesProduccion
+            .Include(o => o.PanaderoUsuario)
+            .Include(o => o.Producto)
+            .Include(o => o.Receta)
+            .FirstOrDefaultAsync(o => o.Id == id);
+
+        if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden no encontrada");
+        if (orden.Estado == "Entregada") return ApiResponse<OrdenProduccionDto>.Fail("Esta orden ya fue finalizada y entregada anteriormente.");
+
+        var totalProducido = dto.CantOptima + dto.CantBuenasCondiciones + dto.CantMalasCondiciones;
+        if (totalProducido <= 0)
+        {
+            dto.CantOptima = orden.CantidadProgramada;
+            totalProducido = orden.CantidadProgramada;
+        }
+
+        var totalAceptable = dto.CantOptima + dto.CantBuenasCondiciones;
+        var malasCondiciones = dto.CantMalasCondiciones;
+
+        orden.CantidadProducida = totalProducido;
+        orden.FechaEntrega = DateTime.UtcNow;
+        orden.Estado = "Entregada";
+
+        // 1. Sumar panes aceptables al stock de producto terminado
+        if (orden.Producto != null && totalAceptable > 0)
+        {
+            orden.Producto.Stock += totalAceptable;
             orden.Producto.Disponible = true;
+        }
+
+        // 2. Procesar panes en mala condición (Transformación o Desecho)
+        if (malasCondiciones > 0)
+        {
+            if (dto.DestinoMalasCondiciones == "Transformacion" || string.IsNullOrWhiteSpace(dto.DestinoMalasCondiciones))
+            {
+                // Sumar al insumo de transformación (Miga / Pan de Transformación)
+                var insumoTransformacion = await ObtenerOCrearInsumoTransformacionAsync();
+                
+                // Estimación: 1 pan de mala condición = aprox 0.08 Kg (80 gr) de pan de transformación
+                var kgTransformacion = malasCondiciones * 0.08m;
+                insumoTransformacion.StockActual += kgTransformacion;
+                insumoTransformacion.FechaActualizacion = DateTime.UtcNow;
+
+                var notaTransf = $"[TRANSFORMACIÓN] {malasCondiciones} panes defectuosos ({kgTransformacion:F2} Kg) pasaron al inventario de Materia Prima para Harina de Pan y Pastas Negras.";
+                orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
+                    ? notaTransf 
+                    : $"{orden.Observaciones} | {notaTransf}";
+            }
+            else if (dto.DestinoMalasCondiciones == "Desecho")
+            {
+                // Registrar baja contable
+                var costoUnit = orden.Producto?.CostoBaseProduccion ?? 0m;
+                if (costoUnit <= 0 && orden.Producto != null) costoUnit = orden.Producto.Precio * 0.55m;
+
+                var baja = new BajaProducto
+                {
+                    ProductoId = orden.ProductoId,
+                    Cantidad = malasCondiciones,
+                    Motivo = "Merma de Horneado / Desecho de Producción",
+                    CostoUnitario = costoUnit,
+                    CostoPerdidaTotal = malasCondiciones * costoUnit,
+                    FechaBaja = DateTime.UtcNow,
+                    UsuarioId = (panaderoId > 0) ? panaderoId : orden.PanaderoUsuarioId,
+                    Observaciones = $"Merma de orden {orden.CodigoOrden} ({malasCondiciones} unidades en mal estado descartadas)."
+                };
+
+                _context.BajasProductos.Add(baja);
+
+                var notaDesecho = $"[DESECHO / BAJA] {malasCondiciones} panes defectuosos registrados en bajas contables por pérdida de horneado (${baja.CostoPerdidaTotal:N0}).";
+                orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
+                    ? notaDesecho 
+                    : $"{orden.Observaciones} | {notaDesecho}";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Observaciones))
+        {
+            orden.Observaciones += $" | Nota Panadero: {dto.Observaciones}";
         }
 
         await _context.SaveChangesAsync();
 
-        return ApiResponse<OrdenProduccionDto>.Ok(_mapper.Map<OrdenProduccionDto>(orden), 
-            $"¡Producción de {cantidadReal} unidades entregada exitosamente al inventario!");
+        var resultDto = _mapper.Map<OrdenProduccionDto>(orden);
+        resultDto.RecetaNombre = orden.Receta?.NombreReceta;
+        resultDto.CantOptima = dto.CantOptima;
+        resultDto.CantBuenasCondiciones = dto.CantBuenasCondiciones;
+        resultDto.CantMalasCondiciones = dto.CantMalasCondiciones;
+        resultDto.DestinoMalasCondiciones = dto.DestinoMalasCondiciones;
+
+        return ApiResponse<OrdenProduccionDto>.Ok(resultDto, 
+            $"¡Horneado culminado! Se ingresaron {totalAceptable} unidades al mostrador ({dto.CantOptima} óptimos, {dto.CantBuenasCondiciones} buenas condiciones) y {malasCondiciones} en destino: {dto.DestinoMalasCondiciones}.");
+    }
+
+    public async Task<ApiResponse<OrdenProduccionDto>> IniciarOrdenAsync(int id)
+    {
+        return await CargarInsumosAsync(id, 0);
+    }
+
+    public async Task<ApiResponse<OrdenProduccionDto>> EntregarProduccionAsync(int id, EntregarProduccionDto dto)
+    {
+        var cuantDto = new CuantificarProduccionDto
+        {
+            CantOptima = dto.CantidadProducida,
+            CantBuenasCondiciones = 0,
+            CantMalasCondiciones = 0,
+            DestinoMalasCondiciones = "Ninguno",
+            Observaciones = dto.Observaciones
+        };
+        return await FinalizarYCuantificarAsync(id, 0, cuantDto);
     }
 
     public async Task<ApiResponse<bool>> CancelarOrdenAsync(int id)
@@ -257,5 +523,128 @@ public class ProduccionService : IProduccionService
         orden.Estado = "Cancelada";
         await _context.SaveChangesAsync();
         return ApiResponse<bool>.Ok(true, "Orden cancelada");
+    }
+
+    // --- MÉTODOS AUXILIARES PARA TRANSFORMACIÓN ---
+    private async Task<Insumo> ObtenerOCrearInsumoTransformacionAsync()
+    {
+        var insumo = await _context.Insumos.FirstOrDefaultAsync(i => i.Nombre.Contains("Transformación") || i.Nombre.Contains("Miga de Pan"));
+        if (insumo != null) return insumo;
+
+        insumo = new Insumo
+        {
+            Nombre = "Pan de Transformación (Harina de Pan / Pastas Negras)",
+            Descripcion = "Miga y piezas de pan recuperadas de horneado en mala condición para reciclaje y transformación gastronómica.",
+            UnidadMedida = "Kg",
+            StockActual = 0m,
+            StockMinimo = 5m,
+            CostoUnitario = 1500m,
+            ProveedorPrincipal = "Producción Interna Claudipan",
+            Activo = true,
+            FechaActualizacion = DateTime.UtcNow
+        };
+
+        _context.Insumos.Add(insumo);
+        await _context.SaveChangesAsync();
+        return insumo;
+    }
+
+    private async Task GarantizarInsumoYRecetasTransformacionAsync()
+    {
+        var insumoTransf = await ObtenerOCrearInsumoTransformacionAsync();
+
+        // 1. Verificar o Crear Producto "Harina de Pan Rallado"
+        var prodHarina = await _context.Productos.FirstOrDefaultAsync(p => p.Nombre.Contains("Harina de Pan"));
+        if (prodHarina == null)
+        {
+            var cat = await _context.Categorias.FirstOrDefaultAsync() ?? new Categoria { Nombre = "Especiales Claudipan" };
+            if (cat.Id == 0) { _context.Categorias.Add(cat); await _context.SaveChangesAsync(); }
+
+            prodHarina = new Producto
+            {
+                Nombre = "Harina de Pan Claudipan (500g)",
+                Descripcion = "Harina de pan tostado artesanal elaborada a partir de transformación de panes seleccionados.",
+                Precio = 3500m,
+                CostoBaseProduccion = 1200m,
+                Stock = 10,
+                CategoriaId = cat.Id,
+                Disponible = true,
+                FechaCreacion = DateTime.UtcNow
+            };
+            _context.Productos.Add(prodHarina);
+            await _context.SaveChangesAsync();
+        }
+
+        // 2. Verificar o Crear Receta de Harina de Pan
+        var recetaHarina = await _context.RecetasProduccion.FirstOrDefaultAsync(r => r.ProductoId == prodHarina.Id && r.Activo);
+        if (recetaHarina == null)
+        {
+            recetaHarina = new RecetaProduccion
+            {
+                ProductoId = prodHarina.Id,
+                NombreReceta = "Fórmula Maestra - Harina de Pan",
+                Descripcion = "Tostado y molienda de pan de transformación para apanados y cocina.",
+                RendimientoUnidades = 20,
+                CostoTotalInsumos = 10000m,
+                CostoUnitarioEstimado = 500m,
+                Activo = true,
+                FechaCreacion = DateTime.UtcNow
+            };
+            recetaHarina.Detalles.Add(new DetalleReceta
+            {
+                InsumoId = insumoTransf.Id,
+                CantidadNecesaria = 5m,
+                UnidadMedida = "Kg"
+            });
+            _context.RecetasProduccion.Add(recetaHarina);
+            await _context.SaveChangesAsync();
+        }
+
+        // 3. Verificar o Crear Producto "Pastas Negras Tradicionales"
+        var prodPastas = await _context.Productos.FirstOrDefaultAsync(p => p.Nombre.Contains("Pastas Negras"));
+        if (prodPastas == null)
+        {
+            var cat = await _context.Categorias.FirstOrDefaultAsync() ?? new Categoria { Nombre = "Dulces y Repostería" };
+            if (cat.Id == 0) { _context.Categorias.Add(cat); await _context.SaveChangesAsync(); }
+
+            prodPastas = new Producto
+            {
+                Nombre = "Pastas Negras Tradicionales (Unidad)",
+                Descripcion = "Dulce tradicional de panadería elaborado con masa enriquecida de pan de transformación, panela y canela.",
+                Precio = 2000m,
+                CostoBaseProduccion = 800m,
+                Stock = 15,
+                CategoriaId = cat.Id,
+                Disponible = true,
+                FechaCreacion = DateTime.UtcNow
+            };
+            _context.Productos.Add(prodPastas);
+            await _context.SaveChangesAsync();
+        }
+
+        // 4. Verificar o Crear Receta de Pastas Negras
+        var recetaPastas = await _context.RecetasProduccion.FirstOrDefaultAsync(r => r.ProductoId == prodPastas.Id && r.Activo);
+        if (recetaPastas == null)
+        {
+            recetaPastas = new RecetaProduccion
+            {
+                ProductoId = prodPastas.Id,
+                NombreReceta = "Fórmula Maestra - Pastas Negras",
+                Descripcion = "Cocción de pan de transformación en melado de panela, especias y horneado en moldes.",
+                RendimientoUnidades = 30,
+                CostoTotalInsumos = 15000m,
+                CostoUnitarioEstimado = 500m,
+                Activo = true,
+                FechaCreacion = DateTime.UtcNow
+            };
+            recetaPastas.Detalles.Add(new DetalleReceta
+            {
+                InsumoId = insumoTransf.Id,
+                CantidadNecesaria = 4m,
+                UnidadMedida = "Kg"
+            });
+            _context.RecetasProduccion.Add(recetaPastas);
+            await _context.SaveChangesAsync();
+        }
     }
 }

@@ -221,4 +221,55 @@ public class ContabilidadService : IContabilidadService
         var list = await query.OrderByDescending(t => t.Fecha).ToListAsync();
         return ApiResponse<List<TransaccionDeudaDto>>.Ok(_mapper.Map<List<TransaccionDeudaDto>>(list));
     }
+
+    public async Task<ApiResponse<MisDeudasResumenDto>> GetMisDeudasResumenAsync(int usuarioId)
+    {
+        var usuario = await _context.Usuarios.FindAsync(usuarioId);
+        if (usuario == null)
+            return ApiResponse<MisDeudasResumenDto>.Fail("Usuario no encontrado");
+
+        var pedidos = await _context.Pedidos
+            .Include(p => p.Usuario)
+            .Include(p => p.Detalles)
+                .ThenInclude(d => d.Producto)
+            .Where(p => p.UsuarioId == usuarioId)
+            .OrderByDescending(p => p.FechaPedido)
+            .ToListAsync();
+
+        var transacciones = await _context.TransaccionesDeuda
+            .Include(t => t.Usuario)
+            .Where(t => t.UsuarioId == usuarioId)
+            .OrderByDescending(t => t.Fecha)
+            .ToListAsync();
+
+        var totalCompras = pedidos.Sum(p => p.Total);
+        var totalFiado = pedidos
+            .Where(p => p.TipoPago == "Credito_Fiado" || (p.TipoPago != null && p.TipoPago.ToLower().Contains("fiado")))
+            .Sum(p => p.Total);
+        var totalContado = totalCompras - totalFiado;
+
+        var totalAbonos = transacciones
+            .Where(t => t.Tipo == "Abono_Pago")
+            .Sum(t => t.Monto);
+
+        var cupoDisponible = Math.Max(0m, usuario.LimiteCredito - usuario.DeudaActual);
+
+        var dto = new MisDeudasResumenDto
+        {
+            UsuarioId = usuario.Id,
+            ClienteNombre = usuario.Nombre,
+            LimiteCredito = usuario.LimiteCredito,
+            DeudaActual = usuario.DeudaActual,
+            CupoDisponible = cupoDisponible,
+            TotalCompras = totalCompras,
+            TotalComprasFiadas = totalFiado,
+            TotalComprasContado = totalContado,
+            TotalAbonos = totalAbonos,
+            CantidadPedidos = pedidos.Count,
+            Pedidos = _mapper.Map<List<PedidoDto>>(pedidos),
+            Transacciones = _mapper.Map<List<TransaccionDeudaDto>>(transacciones)
+        };
+
+        return ApiResponse<MisDeudasResumenDto>.Ok(dto);
+    }
 }

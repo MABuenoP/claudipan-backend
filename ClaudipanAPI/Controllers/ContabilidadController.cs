@@ -18,6 +18,16 @@ public class ContabilidadController : ControllerBase
         _contabilidadService = contabilidadService;
     }
 
+    private int? GetCurrentUserId()
+    {
+        var val = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+
+        return int.TryParse(val, out var id) ? id : null;
+    }
+
     /// <summary>
     /// Resumen contable general: ventas, compras, cartera, gastos, utilidad bruta y neta.
     /// </summary>
@@ -74,16 +84,16 @@ public class ContabilidadController : ControllerBase
     }
 
     /// <summary>
-    /// Obtiene las transacciones de crédito y saldo del cliente autenticado.
+    /// Obtiene el resumen de crédito, saldo, compras (contado/fiado) y transacciones del cliente autenticado.
     /// </summary>
     [HttpGet("mis-deudas")]
     public async Task<IActionResult> GetMisDeudas()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!int.TryParse(userIdClaim, out var userId))
+        var userId = GetCurrentUserId();
+        if (userId == null)
             return Unauthorized();
 
-        var result = await _contabilidadService.GetHistorialCreditosAsync(userId);
+        var result = await _contabilidadService.GetMisDeudasResumenAsync(userId.Value);
         return Ok(result);
     }
 }

@@ -17,8 +17,10 @@ public class PedidoDto
     public decimal Total { get; set; }
     public decimal MontoFiado { get; set; }
     public string Estado { get; set; } = string.Empty;
-    public string TipoPago { get; set; } = string.Empty;
+    public string TipoPago { get; set; } = string.Empty; // Efectivo, Nequi, Transferencia, Tarjeta, Credito_Fiado
     public string EstadoPago { get; set; } = string.Empty;
+    public string? ComprobanteBase64 { get; set; }
+    public string? ReferenciaPago { get; set; }
     public string? DireccionEntrega { get; set; }
     public string? Observaciones { get; set; }
     public List<DetallePedidoDto> Detalles { get; set; } = new();
@@ -37,7 +39,9 @@ public class PedidoCreateDto
     public string? DireccionEntrega { get; set; }
     public string? Observaciones { get; set; }
 
-    public string TipoPago { get; set; } = "Efectivo"; // Efectivo, Transferencia, Tarjeta, Credito_Fiado
+    public string TipoPago { get; set; } = "Efectivo"; // Efectivo, Nequi, Transferencia, Tarjeta, Credito_Fiado
+    public string? ComprobanteBase64 { get; set; }
+    public string? ReferenciaPago { get; set; }
     public List<DetallePedidoCreateDto> Detalles { get; set; } = new();
 }
 
@@ -68,6 +72,8 @@ public class TransaccionDeudaDto
     public string Tipo { get; set; } = string.Empty; // Cargo_Credito, Abono_Pago
     public string Concepto { get; set; } = string.Empty;
     public string? MetodoPagoAbono { get; set; }
+    public string? ComprobanteBase64 { get; set; }
+    public string? ReferenciaPago { get; set; }
     public DateTime Fecha { get; set; }
 }
 
@@ -75,6 +81,8 @@ public class RegistrarAbonoDto
 {
     public int UsuarioId { get; set; }
     public decimal Monto { get; set; }
-    public string? MetodoPago { get; set; } = "Efectivo";
+    public string? MetodoPago { get; set; } = "Efectivo"; // Efectivo, Nequi, Transferencia
     public string? Concepto { get; set; }
+    public string? ComprobanteBase64 { get; set; }
+    public string? ReferenciaPago { get; set; }
 }

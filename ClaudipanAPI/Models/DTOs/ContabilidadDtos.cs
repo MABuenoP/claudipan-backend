@@ -60,3 +60,19 @@ public class AuditoriaDto
     public DateTime Fecha { get; set; }
     public string? DireccionIp { get; set; }
 }
+
+public class MisDeudasResumenDto
+{
+    public int UsuarioId { get; set; }
+    public string ClienteNombre { get; set; } = string.Empty;
+    public decimal LimiteCredito { get; set; }
+    public decimal DeudaActual { get; set; }
+    public decimal CupoDisponible { get; set; }
+    public decimal TotalCompras { get; set; }
+    public decimal TotalComprasFiadas { get; set; }
+    public decimal TotalComprasContado { get; set; }
+    public decimal TotalAbonos { get; set; }
+    public int CantidadPedidos { get; set; }
+    public List<PedidoDto> Pedidos { get; set; } = new();
+    public List<TransaccionDeudaDto> Transacciones { get; set; } = new();
+}

@@ -15,17 +15,27 @@ public class PedidosController : ControllerBase
     public PedidosController(IPedidoService pedidoService) 
         => _pedidoService = pedidoService;
 
+    private int? GetCurrentUserId()
+    {
+        var val = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+
+        return int.TryParse(val, out var id) ? id : null;
+    }
+
     [HttpGet]
     [Authorize]
     public async Task<IActionResult> GetAll([FromQuery] string? estado, [FromQuery] string? tipoPago)
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = GetCurrentUserId();
         
         int? filterUserId = null;
-        if (role == "Cliente" && int.TryParse(userIdClaim, out var userId))
+        if (role == "Cliente" && userId.HasValue)
         {
-            filterUserId = userId;
+            filterUserId = userId.Value;
         }
 
         var result = await _pedidoService.GetAllAsync(filterUserId, estado, tipoPago);
@@ -44,13 +54,11 @@ public class PedidosController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> Create([FromBody] PedidoCreateDto dto)
     {
-        if (User.Identity?.IsAuthenticated == true && !dto.EsInvitado)
+        var userId = GetCurrentUserId();
+        if (userId.HasValue)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (int.TryParse(userIdClaim, out var userId))
-            {
-                dto.UsuarioId = userId;
-            }
+            dto.UsuarioId = userId.Value;
+            dto.EsInvitado = false;
         }
 
         var result = await _pedidoService.CreateAsync(dto);
@@ -78,11 +86,11 @@ public class PedidosController : ControllerBase
     public async Task<IActionResult> GetDeudas([FromQuery] int? usuarioId)
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = GetCurrentUserId();
 
-        if (role == "Cliente" && int.TryParse(userIdClaim, out var clientId))
+        if (role == "Cliente" && userId.HasValue)
         {
-            usuarioId = clientId;
+            usuarioId = userId.Value;
         }
 
         var result = await _pedidoService.GetTransaccionesDeudaAsync(usuarioId);
@@ -94,11 +102,11 @@ public class PedidosController : ControllerBase
     public async Task<IActionResult> RegistrarAbono([FromBody] RegistrarAbonoDto dto)
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = GetCurrentUserId();
 
-        if (role == "Cliente" && int.TryParse(userIdClaim, out var clientId))
+        if (role == "Cliente" && userId.HasValue)
         {
-            dto.UsuarioId = clientId;
+            dto.UsuarioId = userId.Value;
         }
 
         var result = await _pedidoService.RegistrarAbonoClienteAsync(dto);

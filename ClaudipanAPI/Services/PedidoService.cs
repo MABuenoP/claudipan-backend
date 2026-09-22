@@ -85,6 +85,8 @@ public class PedidoService : IPedidoService
             DireccionEntrega = dto.DireccionEntrega ?? usuario?.Direccion,
             Observaciones = dto.Observaciones,
             TipoPago = dto.TipoPago,
+            ComprobanteBase64 = dto.ComprobanteBase64,
+            ReferenciaPago = dto.ReferenciaPago,
             Estado = "Pendiente",
             Total = 0m
         };
@@ -116,6 +118,7 @@ public class PedidoService : IPedidoService
             producto.Stock -= item.Cantidad;
         }
 
+        decimal saldoAnterior = 0m;
         // Validar cupo de crédito para fiar
         if (dto.TipoPago == "Credito_Fiado" && usuario != null)
         {
@@ -126,25 +129,10 @@ public class PedidoService : IPedidoService
                     $"El valor del pedido (${pedido.Total:N0}) supera su cupo disponible para fiar (${cupoDisponible:N0}). Cupo total: ${usuario.LimiteCredito:N0}.");
             }
 
-            var saldoAnterior = usuario.DeudaActual;
+            saldoAnterior = usuario.DeudaActual;
             usuario.DeudaActual += pedido.Total;
             pedido.EstadoPago = "Pendiente_Credito";
             pedido.MontoFiado = pedido.Total;
-
-            // Registrar transacción de deuda
-            var transaccion = new TransaccionDeuda
-            {
-                UsuarioId = usuario.Id,
-                Pedido = pedido,
-                Monto = pedido.Total,
-                SaldoAnterior = saldoAnterior,
-                SaldoNuevo = usuario.DeudaActual,
-                Tipo = "Cargo_Credito",
-                Concepto = $"Compra a crédito (fiado) - Pedido #{pedido.Id}",
-                Fecha = DateTime.UtcNow
-            };
-
-            _context.TransaccionesDeuda.Add(transaccion);
         }
         else
         {
@@ -155,14 +143,33 @@ public class PedidoService : IPedidoService
         _context.Pedidos.Add(pedido);
         await _context.SaveChangesAsync();
 
-        // Recargar referencias
-        if (pedido.UsuarioId.HasValue)
-            await _context.Entry(pedido).Reference(p => p.Usuario).LoadAsync();
+        // Registrar transacción de deuda si fue fiado
+        if (dto.TipoPago == "Credito_Fiado" && usuario != null)
+        {
+            var transaccion = new TransaccionDeuda
+            {
+                UsuarioId = usuario.Id,
+                PedidoId = pedido.Id,
+                Monto = pedido.Total,
+                SaldoAnterior = saldoAnterior,
+                SaldoNuevo = usuario.DeudaActual,
+                Tipo = "Cargo_Credito",
+                Concepto = $"Compra a crédito (fiado) - Pedido #{pedido.Id}",
+                Fecha = DateTime.UtcNow
+            };
 
-        foreach (var det in pedido.Detalles)
-            await _context.Entry(det).Reference(d => d.Producto).LoadAsync();
+            _context.TransaccionesDeuda.Add(transaccion);
+            await _context.SaveChangesAsync();
+        }
 
-        var resultDto = _mapper.Map<PedidoDto>(pedido);
+        // Recargar con todas las relaciones para respuesta completa
+        var finalPedido = await _context.Pedidos
+            .Include(p => p.Usuario)
+            .Include(p => p.Detalles)
+                .ThenInclude(d => d.Producto)
+            .FirstOrDefaultAsync(p => p.Id == pedido.Id);
+
+        var resultDto = _mapper.Map<PedidoDto>(finalPedido ?? pedido);
         return ApiResponse<PedidoDto>.Ok(resultDto, "Pedido registrado exitosamente");
     }
 
@@ -259,6 +266,8 @@ public class PedidoService : IPedidoService
             Tipo = "Abono_Pago",
             Concepto = string.IsNullOrWhiteSpace(dto.Concepto) ? "Abono a deuda de fiado" : dto.Concepto,
             MetodoPagoAbono = dto.MetodoPago ?? "Efectivo",
+            ComprobanteBase64 = dto.ComprobanteBase64,
+            ReferenciaPago = dto.ReferenciaPago,
             Fecha = DateTime.UtcNow
         };
 

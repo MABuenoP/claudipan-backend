@@ -15,31 +15,42 @@ public static class DbInitializer
 {
     public static void Initialize(AppDbContext context)
     {
-        try
+        // 0. Si la base de datos ya fue inicializada, omitir todas las consultas repetitivas de semillero
+        if (context.Usuarios.Any())
         {
-            // En SQL Server remoto, si la base de datos ya existe pero no tiene las tablas de Claudipan,
-            // CreateTables() genera las tablas correspondientes a todos los DbSets.
-            var creator = context.Database.GetService<IDatabaseCreator>() as IRelationalDatabaseCreator;
-            if (creator != null)
+            // Sincronizar cualquier pedido fiado huérfano para vincularlo al cliente y registrar su deuda
+            var cliente = context.Usuarios.FirstOrDefault(u => u.Rol == "Cliente");
+            if (cliente != null)
             {
-                try
+                var pedidosFiadosSinUsuario = context.Pedidos
+                    .Where(p => p.TipoPago == "Credito_Fiado" && (p.UsuarioId == null || p.UsuarioId == 0))
+                    .ToList();
+
+                foreach (var p in pedidosFiadosSinUsuario)
                 {
-                    creator.CreateTables();
-                    Log.Information("Tablas de Claudipan creadas exitosamente en la base de datos.");
+                    p.UsuarioId = cliente.Id;
+                    p.EsInvitado = false;
+                    cliente.DeudaActual += p.Total;
+
+                    context.TransaccionesDeuda.Add(new TransaccionDeuda
+                    {
+                        UsuarioId = cliente.Id,
+                        PedidoId = p.Id,
+                        Monto = p.Total,
+                        SaldoAnterior = cliente.DeudaActual - p.Total,
+                        SaldoNuevo = cliente.DeudaActual,
+                        Tipo = "Cargo_Credito",
+                        Concepto = $"Compra a crédito (fiado) - Pedido #{p.Id}",
+                        Fecha = p.FechaPedido
+                    });
                 }
-                catch
+
+                if (pedidosFiadosSinUsuario.Any())
                 {
-                    // Si ya existían algunas tablas, continuar normalmente con el seeder
+                    context.SaveChanges();
                 }
             }
-            else
-            {
-                context.Database.EnsureCreated();
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warning("Nota al verificar tablas: {Message}", ex.Message);
+            return;
         }
 
         // 1. USUARIOS CON LOS 6 ROLES DEL SISTEMA

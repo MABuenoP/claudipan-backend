@@ -174,16 +174,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Seed de datos iniciales
-try
-{
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    DbInitializer.Initialize(db);
-}
-catch (Exception ex)
-{
-    Log.Error(ex, "Error al inicializar la base de datos");
-}
+
 
 app.Run();

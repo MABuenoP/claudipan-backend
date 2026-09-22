@@ -10,4 +10,5 @@ public interface IContabilidadService
     Task<ApiResponse<List<ReporteProductoRotacionDto>>> GetProductosMasVendidosAsync(int top = 10);
     Task<ApiResponse<List<ReporteProductoRotacionDto>>> GetProductosConRezagoOPerdidasAsync();
     Task<ApiResponse<List<TransaccionDeudaDto>>> GetHistorialCreditosAsync(int? usuarioId = null);
+    Task<ApiResponse<MisDeudasResumenDto>> GetMisDeudasResumenAsync(int usuarioId);
 }

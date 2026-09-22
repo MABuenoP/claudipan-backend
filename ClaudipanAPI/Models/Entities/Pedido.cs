@@ -25,9 +25,11 @@ public class Pedido
     public string Estado { get; set; } = "Pendiente"; // Pendiente, En preparación, Listo, Entregado, Cancelado
 
     // Tipo de pago y validación
-    public string TipoPago { get; set; } = "Efectivo"; // Efectivo, Transferencia, Tarjeta, Credito_Fiado
+    public string TipoPago { get; set; } = "Efectivo"; // Efectivo, Nequi, Transferencia, Tarjeta, Credito_Fiado
     public string EstadoPago { get; set; } = "Pagado"; // Pagado, Pendiente_Credito
     public decimal MontoFiado { get; set; } = 0m;
+    public string? ComprobanteBase64 { get; set; }
+    public string? ReferenciaPago { get; set; }
 
     public string? DireccionEntrega { get; set; }
     public string? Observaciones { get; set; }
