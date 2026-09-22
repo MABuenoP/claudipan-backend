@@ -4,6 +4,10 @@ public class Usuario
 {
     public int Id { get; set; }
     public string Nombre { get; set; } = string.Empty;
+    public string? PrimerNombre { get; set; }
+    public string? SegundoNombre { get; set; }
+    public string? PrimerApellido { get; set; }
+    public string? SegundoApellido { get; set; }
     public string? Cedula { get; set; }
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
@@ -17,6 +21,8 @@ public class Usuario
     public string? RefreshToken { get; set; }
     public DateTime? RefreshTokenExpiry { get; set; }
     public DateTime FechaCreacion { get; set; } = DateTime.UtcNow;
+
+    public UsuarioFoto? Foto { get; set; }
 
     public ICollection<Pedido> Pedidos { get; set; } = new List<Pedido>();
     public ICollection<TransaccionDeuda> TransaccionesDeuda { get; set; } = new List<TransaccionDeuda>();

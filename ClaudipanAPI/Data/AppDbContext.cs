@@ -8,6 +8,7 @@ public class AppDbContext : DbContext
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<Usuario> Usuarios => Set<Usuario>();
+    public DbSet<UsuarioFoto> UsuarioFotos => Set<UsuarioFoto>();
     public DbSet<Cliente> Clientes => Set<Cliente>();
     public DbSet<Categoria> Categorias => Set<Categoria>();
     public DbSet<Producto> Productos => Set<Producto>();
@@ -157,6 +158,13 @@ public class AppDbContext : DbContext
             .WithMany(p => p.Bajas)
             .HasForeignKey(b => b.ProductoId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // Relación Usuario y Foto (1 a 1)
+        modelBuilder.Entity<Usuario>()
+            .HasOne(u => u.Foto)
+            .WithOne(f => f.Usuario)
+            .HasForeignKey<UsuarioFoto>(f => f.UsuarioId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         // Índices
         modelBuilder.Entity<Producto>().HasIndex(p => p.Nombre);

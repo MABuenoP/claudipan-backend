@@ -17,6 +17,16 @@ public class AuthController : ControllerBase
 
     public AuthController(IAuthService authService) => _authService = authService;
 
+    private int? GetCurrentUserId()
+    {
+        var val = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+
+        return int.TryParse(val, out var id) ? id : null;
+    }
+
     /// <summary>
     /// Inicia sesión y devuelve un token JWT.
     /// </summary>
@@ -54,34 +64,49 @@ public class AuthController : ControllerBase
     [Authorize]
     public async Task<IActionResult> GetProfile()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!int.TryParse(userIdClaim, out var userId))
+        var userId = GetCurrentUserId();
+        if (userId == null)
             return Unauthorized();
 
-        var result = await _authService.GetProfileAsync(userId);
+        var result = await _authService.GetProfileAsync(userId.Value);
         return result.Success ? Ok(result) : NotFound(result);
     }
 
     /// <summary>
-    /// Actualiza el perfil del usuario autenticado.
+    /// Actualiza el perfil del usuario autenticado (incluye cambio de foto y datos personales).
     /// </summary>
     [HttpPut("profile")]
     [Authorize]
     public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!int.TryParse(userIdClaim, out var userId))
+        var userId = GetCurrentUserId();
+        if (userId == null)
             return Unauthorized();
 
-        var result = await _authService.UpdateProfileAsync(userId, dto);
+        var result = await _authService.UpdateProfileAsync(userId.Value, dto);
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
     /// <summary>
-    /// Obtiene la lista completa de usuarios (Administrador y Técnico).
+    /// Cambia la contraseña del usuario autenticado de forma directa.
+    /// </summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null)
+            return Unauthorized();
+
+        var result = await _authService.ChangePasswordAsync(userId.Value, dto);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Obtiene la lista completa de usuarios (Solo Administrador y Gerente).
     /// </summary>
     [HttpGet("users")]
-    [Authorize(Roles = "Administrador,Tecnico")]
+    [Authorize(Roles = "Administrador,Gerente")]
     public async Task<IActionResult> GetAllUsers()
     {
         var result = await _authService.GetAllUsersAsync();
@@ -89,10 +114,10 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Crea un usuario nuevo con rol específico (Administrador y Técnico).
+    /// Crea un usuario nuevo con rol específico (Solo Administrador y Gerente).
     /// </summary>
     [HttpPost("users")]
-    [Authorize(Roles = "Administrador,Tecnico")]
+    [Authorize(Roles = "Administrador,Gerente")]
     public async Task<IActionResult> CreateUserAdmin([FromBody] UpdateUsuarioAdminDto dto)
     {
         var result = await _authService.CreateUserAdminAsync(dto);
@@ -100,10 +125,10 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Actualiza rol, datos o crédito de un usuario (Administrador y Técnico).
+    /// Actualiza rol, datos, foto o tope de crédito de un usuario (Solo Administrador y Gerente).
     /// </summary>
     [HttpPut("users/{id}")]
-    [Authorize(Roles = "Administrador,Tecnico")]
+    [Authorize(Roles = "Administrador,Gerente")]
     public async Task<IActionResult> UpdateUserAdmin(int id, [FromBody] UpdateUsuarioAdminDto dto)
     {
         var result = await _authService.UpdateUserAdminAsync(id, dto);
@@ -111,10 +136,10 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Desactiva a un usuario (Administrador).
+    /// Desactiva a un usuario (Solo Administrador y Gerente).
     /// </summary>
     [HttpDelete("users/{id}")]
-    [Authorize(Roles = "Administrador")]
+    [Authorize(Roles = "Administrador,Gerente")]
     public async Task<IActionResult> DeleteUserAdmin(int id)
     {
         var result = await _authService.DeleteUserAdminAsync(id);
