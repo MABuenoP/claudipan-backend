@@ -41,7 +41,7 @@ public class ProveedoresController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    [HttpPut("{id}")]
+    [HttpPost("{id}"), HttpPut("{id}")]
     [Authorize(Roles = "Administrador,Gerente,Contable")]
     public async Task<IActionResult> Update(int id, [FromBody] ProveedorUpdateDto dto)
     {

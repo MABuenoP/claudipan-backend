@@ -33,15 +33,15 @@ public class CategoriasController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Administrador,Tecnico")]
+    [Authorize(Roles = "Administrador,Gerente,Tecnico")]
     public async Task<IActionResult> Create([FromBody] CategoriaCreateDto dto)
     {
         var result = await _categoriaService.CreateAsync(dto);
         return CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result);
     }
 
-    [HttpPut("{id}")]
-    [Authorize(Roles = "Administrador,Tecnico")]
+    [HttpPost("{id}"), HttpPut("{id}")]
+    [Authorize(Roles = "Administrador,Gerente,Tecnico")]
     public async Task<IActionResult> Update(int id, [FromBody] CategoriaUpdateDto dto)
     {
         var result = await _categoriaService.UpdateAsync(id, dto);
@@ -49,7 +49,7 @@ public class CategoriasController : ControllerBase
     }
 
     [HttpDelete("{id}")]
-    [Authorize(Roles = "Administrador,Tecnico")]
+    [Authorize(Roles = "Administrador,Gerente,Tecnico")]
     public async Task<IActionResult> Delete(int id)
     {
         var result = await _categoriaService.DeleteAsync(id);

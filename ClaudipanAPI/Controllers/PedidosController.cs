@@ -65,7 +65,7 @@ public class PedidosController : ControllerBase
         return result.Success ? CreatedAtAction(nameof(GetById), new { id = result.Data?.Id ?? 0 }, result) : BadRequest(result);
     }
 
-    [HttpPatch("{id}/estado")]
+    [HttpPost("{id}/estado"), HttpPatch("{id}/estado")]
     [Authorize(Roles = "Administrador,Gerente,Vendedor,Panadero,Contable")]
     public async Task<IActionResult> UpdateEstado(int id, [FromBody] string nuevoEstado)
     {
