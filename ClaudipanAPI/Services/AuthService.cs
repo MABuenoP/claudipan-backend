@@ -5,6 +5,7 @@ using ClaudipanAPI.Models.DTOs;
 using ClaudipanAPI.Models.Entities;
 using ClaudipanAPI.Models.Responses;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 
 namespace ClaudipanAPI.Services;
 
@@ -622,5 +623,207 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
 
         return ApiResponse<bool>.Ok(true, "¡Contraseña activada exitosamente! Ya puedes iniciar sesión con tu nueva contraseña.");
+    }
+
+    public async Task<ApiResponse<PreRegisterResponseDto>> PreRegisterAsync(RegisterRequestDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return ApiResponse<PreRegisterResponseDto>.Fail("El correo es requerido");
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+            return ApiResponse<PreRegisterResponseDto>.Fail("La contraseña es requerida");
+
+        var emailLower = request.Email.Trim().ToLower();
+
+        if (await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == emailLower))
+            return ApiResponse<PreRegisterResponseDto>.Fail("El correo electrónico ya se encuentra registrado");
+
+        if (!string.IsNullOrWhiteSpace(request.Cedula) && await _context.Usuarios.AnyAsync(u => u.Cedula != null && u.Cedula.Trim() == request.Cedula.Trim()))
+            return ApiResponse<PreRegisterResponseDto>.Fail("El número de cédula ya se encuentra registrado");
+
+        if (!string.IsNullOrWhiteSpace(request.Telefono) && await _context.Usuarios.AnyAsync(u => u.Telefono != null && u.Telefono.Trim() == request.Telefono.Trim()))
+            return ApiResponse<PreRegisterResponseDto>.Fail("El número de celular ya se encuentra registrado");
+
+        // Cancelar prerregistros pendientes previos para este mismo correo
+        var pendingPrevious = await _context.PreRegistros
+            .Where(p => p.Email.ToLower() == emailLower && p.Estado == "Pendiente")
+            .ToListAsync();
+        foreach (var prev in pendingPrevious)
+        {
+            prev.Estado = "Cancelado";
+        }
+
+        var fullName = BuildFullName(request.PrimerNombre, request.SegundoNombre, request.PrimerApellido, request.SegundoApellido, request.Nombre);
+
+        var tokenValidacion = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+        var tokenCancelacion = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+
+        var preregistro = new PreRegistro
+        {
+            PrimerNombre = request.PrimerNombre,
+            SegundoNombre = request.SegundoNombre,
+            PrimerApellido = request.PrimerApellido,
+            SegundoApellido = request.SegundoApellido,
+            Nombre = fullName,
+            Cedula = request.Cedula,
+            Email = request.Email.Trim(),
+            PasswordPlana = request.Password,
+            Telefono = request.Telefono,
+            Direccion = request.Direccion,
+            RedesSociales = request.RedesSociales,
+            Rol = "Cliente",
+            LimiteCredito = request.LimiteCredito ?? 50000m,
+            FotoBase64 = request.FotoBase64,
+            TokenValidacion = tokenValidacion,
+            TokenCancelacion = tokenCancelacion,
+            FechaCreacion = DateTime.UtcNow,
+            FechaExpiracion = DateTime.UtcNow.AddHours(48),
+            Estado = "Pendiente"
+        };
+
+        _context.PreRegistros.Add(preregistro);
+        await _context.SaveChangesAsync();
+
+        // Enviar correo con token y datos
+        var sent = await _emailService.SendPreRegisterEmailAsync(preregistro);
+        if (!sent)
+        {
+            Log.Warning("No se pudo enviar el correo de prerregistro a {Email}", preregistro.Email);
+        }
+
+        return ApiResponse<PreRegisterResponseDto>.Ok(new PreRegisterResponseDto
+        {
+            Email = preregistro.Email,
+            Nombre = preregistro.Nombre,
+            Mensaje = "¡Prerregistro completado con éxito! Hemos enviado un correo con todos tus datos y el enlace para validar o cancelar tu registro."
+        }, "Prerregistro exitoso");
+    }
+
+    public async Task<ApiResponse<AuthResponseDto>> ConfirmPreRegisterAsync(ConfirmPreRegisterDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email))
+            return ApiResponse<AuthResponseDto>.Fail("Token y correo electrónico son requeridos");
+
+        var emailLower = request.Email.Trim().ToLower();
+
+        var preregistro = await _context.PreRegistros
+            .FirstOrDefaultAsync(p => p.Email.ToLower() == emailLower 
+                                   && p.TokenValidacion == request.Token.Trim() 
+                                   && p.Estado == "Pendiente");
+
+        if (preregistro == null)
+        {
+            return ApiResponse<AuthResponseDto>.Fail("El enlace de validación es inválido, ya fue utilizado o ha sido cancelado.");
+        }
+
+        if (DateTime.UtcNow > preregistro.FechaExpiracion)
+        {
+            preregistro.Estado = "Expirado";
+            await _context.SaveChangesAsync();
+            return ApiResponse<AuthResponseDto>.Fail("El enlace de validación ha expirado. Por favor realiza un nuevo registro.");
+        }
+
+        // Verificar que no se haya registrado mientras tanto
+        if (await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == emailLower))
+        {
+            preregistro.Estado = "Validado";
+            await _context.SaveChangesAsync();
+            return ApiResponse<AuthResponseDto>.Fail("El correo ya se encuentra registrado y activo como usuario.");
+        }
+
+        // Crear el usuario definitivo convirtiendo la contraseña en MD5 como se solicitó
+        var usuario = new Usuario
+        {
+            PrimerNombre = preregistro.PrimerNombre,
+            SegundoNombre = preregistro.SegundoNombre,
+            PrimerApellido = preregistro.PrimerApellido,
+            SegundoApellido = preregistro.SegundoApellido,
+            Nombre = preregistro.Nombre,
+            Cedula = preregistro.Cedula,
+            Email = preregistro.Email,
+            PasswordHash = PasswordHelper.HashMD5(preregistro.PasswordPlana),
+            Telefono = preregistro.Telefono,
+            Direccion = preregistro.Direccion,
+            RedesSociales = preregistro.RedesSociales,
+            Rol = "Cliente",
+            LimiteCredito = preregistro.LimiteCredito,
+            DeudaActual = 0m,
+            Activo = true,
+            FechaCreacion = DateTime.UtcNow
+        };
+
+        _context.Usuarios.Add(usuario);
+        await _context.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(preregistro.FotoBase64))
+        {
+            _context.UsuarioFotos.Add(new UsuarioFoto
+            {
+                UsuarioId = usuario.Id,
+                FotoBase64 = preregistro.FotoBase64,
+                FechaActualizacion = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
+        }
+
+        // Marcar prerregistro como Validado
+        preregistro.Estado = "Validado";
+        await _context.SaveChangesAsync();
+
+        // Generar tokens de sesión
+        var token = JwtHelper.GenerateToken(usuario, _configuration);
+        var refreshToken = JwtHelper.GenerateRefreshToken();
+        var expiration = DateTime.UtcNow.AddMinutes(
+            double.Parse(_configuration["JwtSettings:ExpirationInMinutes"] ?? "1440"));
+
+        usuario.RefreshToken = refreshToken;
+        usuario.RefreshTokenExpiry = DateTime.UtcNow.AddDays(
+            double.Parse(_configuration["JwtSettings:RefreshTokenExpirationInDays"] ?? "7"));
+        await _context.SaveChangesAsync();
+
+        return ApiResponse<AuthResponseDto>.Ok(new AuthResponseDto
+        {
+            Id = usuario.Id,
+            Token = token,
+            RefreshToken = refreshToken,
+            Expiracion = expiration,
+            Email = usuario.Email,
+            Nombre = usuario.Nombre,
+            PrimerNombre = usuario.PrimerNombre,
+            SegundoNombre = usuario.SegundoNombre,
+            PrimerApellido = usuario.PrimerApellido,
+            SegundoApellido = usuario.SegundoApellido,
+            Cedula = usuario.Cedula,
+            Rol = usuario.Rol,
+            Telefono = usuario.Telefono,
+            Direccion = usuario.Direccion,
+            RedesSociales = usuario.RedesSociales,
+            LimiteCredito = usuario.LimiteCredito,
+            DeudaActual = usuario.DeudaActual,
+            FotoBase64 = preregistro.FotoBase64
+        }, "¡Tu registro ha sido confirmado exitosamente! Bienvenido a Claudipan.");
+    }
+
+    public async Task<ApiResponse<bool>> CancelPreRegisterAsync(CancelPreRegisterDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.Email))
+            return ApiResponse<bool>.Fail("Token y correo electrónico son requeridos");
+
+        var emailLower = request.Email.Trim().ToLower();
+
+        var preregistro = await _context.PreRegistros
+            .FirstOrDefaultAsync(p => p.Email.ToLower() == emailLower 
+                                   && p.TokenCancelacion == request.Token.Trim() 
+                                   && p.Estado == "Pendiente");
+
+        if (preregistro == null)
+        {
+            return ApiResponse<bool>.Fail("La solicitud no existe, ya fue cancelada o ya fue validada previamente.");
+        }
+
+        preregistro.Estado = "Cancelado";
+        await _context.SaveChangesAsync();
+
+        return ApiResponse<bool>.Ok(true, "Tu registro ha sido cancelado con éxito. Tus datos no fueron almacenados como usuario activo.");
     }
 }

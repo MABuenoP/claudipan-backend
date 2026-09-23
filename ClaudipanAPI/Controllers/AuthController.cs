@@ -122,6 +122,92 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Realiza el prerregistro de un usuario y envía el correo con token para validar o cancelar.
+    /// </summary>
+    [HttpPost("preregister")]
+    public async Task<IActionResult> PreRegister([FromBody] RegisterRequestDto request)
+    {
+        var ip = GetClientIp();
+        var result = await _authService.PreRegisterAsync(request);
+        if (result.Success && result.Data != null)
+        {
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: null,
+                usuarioEmail: request.Email,
+                accion: "Prerregistro de Usuario",
+                tabla: "PreRegistros",
+                registroId: request.Email,
+                anterior: null,
+                nuevo: $"Prerregistro iniciado para {request.Nombre} ({request.Email}). Correo de validación enviado.",
+                ip: ip,
+                formulario: "Formulario de Registro",
+                usuarioNombre: request.Nombre,
+                usuarioRol: "Cliente"
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
+    }
+
+    /// <summary>
+    /// Valida y confirma el prerregistro de un usuario usando el token recibido por correo.
+    /// Convierte la contraseña en hash MD5 y crea el usuario activo.
+    /// </summary>
+    [HttpPost("confirm-preregister")]
+    public async Task<IActionResult> ConfirmPreRegister([FromBody] ConfirmPreRegisterDto request)
+    {
+        var ip = GetClientIp();
+        var result = await _authService.ConfirmPreRegisterAsync(request);
+        if (result.Success && result.Data != null)
+        {
+            var u = result.Data;
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: u.Id,
+                usuarioEmail: u.Email,
+                accion: "Confirmación de Registro",
+                tabla: "Usuarios",
+                registroId: u.Id.ToString(),
+                anterior: null,
+                nuevo: $"Registro validado por correo con token. Usuario activado: {u.Nombre} ({u.Email})",
+                ip: ip,
+                formulario: "Confirmación de Registro",
+                usuarioNombre: u.Nombre,
+                usuarioRol: u.Rol
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
+    }
+
+    /// <summary>
+    /// Cancela el prerregistro de un usuario mediante el token recibido por correo.
+    /// </summary>
+    [HttpPost("cancel-preregister")]
+    public async Task<IActionResult> CancelPreRegister([FromBody] CancelPreRegisterDto request)
+    {
+        var ip = GetClientIp();
+        var result = await _authService.CancelPreRegisterAsync(request);
+        if (result.Success)
+        {
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: null,
+                usuarioEmail: request.Email,
+                accion: "Cancelación de Registro",
+                tabla: "PreRegistros",
+                registroId: request.Email,
+                anterior: null,
+                nuevo: $"Prerregistro cancelado mediante correo para {request.Email}",
+                ip: ip,
+                formulario: "Cancelación de Registro",
+                usuarioNombre: request.Email,
+                usuarioRol: "Cliente"
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
+    }
+
+    /// <summary>
     /// Renueva el token JWT usando un refresh token válido.
     /// </summary>
     [HttpPost("refresh-token")]

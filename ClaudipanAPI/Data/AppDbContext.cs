@@ -36,6 +36,7 @@ public class AppDbContext : DbContext
     public DbSet<MaterialInventario> MaterialesInventario => Set<MaterialInventario>();
     public DbSet<TransaccionDeuda> TransaccionesDeuda => Set<TransaccionDeuda>();
     public DbSet<Auditoria> Auditorias => Set<Auditoria>();
+    public DbSet<PreRegistro> PreRegistros => Set<PreRegistro>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -44,6 +45,7 @@ public class AppDbContext : DbContext
         // Precisión de campos decimales
         modelBuilder.Entity<Usuario>().Property(u => u.LimiteCredito).HasPrecision(18, 2);
         modelBuilder.Entity<Usuario>().Property(u => u.DeudaActual).HasPrecision(18, 2);
+        modelBuilder.Entity<PreRegistro>().Property(p => p.LimiteCredito).HasPrecision(18, 2);
 
         modelBuilder.Entity<Producto>().Property(p => p.Precio).HasPrecision(18, 2);
         modelBuilder.Entity<Producto>().Property(p => p.PrecioOferta).HasPrecision(18, 2);

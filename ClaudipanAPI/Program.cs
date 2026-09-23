@@ -33,20 +33,13 @@ var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING"
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Server=windows21.rootservers.co\\MSSQLSERVER2019;Database=pedroley_clau;User Id=pedroley_claudi;Password=Mc98Jm03Jp04!;TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=true";
 
-// Entity Framework Core con SQL Server (y fallback SQLite si el servidor remoto no responde)
+// Entity Framework Core con Microsoft SQL Server
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    if (!string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+    options.UseSqlServer(connectionString, sqlOptions =>
     {
-        options.UseSqlServer(connectionString, sqlOptions =>
-        {
-            sqlOptions.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null);
-        });
-    }
-    else
-    {
-        options.UseSqlite(builder.Configuration.GetConnectionString("SqliteFallback") ?? "Data Source=ClaudipanDB.db");
-    }
+        sqlOptions.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null);
+    });
 });
 
 // JWT Settings
@@ -281,38 +274,33 @@ using (var scope = app.Services.CreateScope())
                     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Auditorias') AND name = 'UsuarioRol')
                         ALTER TABLE Auditorias ADD UsuarioRol NVARCHAR(50) NULL;
                 END
-            ");
-        }
-        else if (db.Database.IsSqlite())
-        {
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetToken TEXT NULL;"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetExpiry TEXT NULL;"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetHash TEXT NULL;"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Pedidos ADD COLUMN CodigoTicket TEXT NULL;"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Pedidos ADD COLUMN MetodoEntrega TEXT DEFAULT 'Mostrador';"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Pedidos ADD COLUMN CostoEnvio REAL DEFAULT 0;"); } catch { }
-            try {
-                db.Database.ExecuteSqlRaw(@"
-                    CREATE TABLE IF NOT EXISTS Auditorias (
-                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        UsuarioId INTEGER NULL,
-                        UsuarioNombre TEXT NULL,
-                        UsuarioEmail TEXT NOT NULL DEFAULT 'Sistema',
-                        UsuarioRol TEXT NULL,
-                        Accion TEXT NOT NULL,
-                        TablaAfectada TEXT NOT NULL,
-                        RegistroId TEXT NULL,
-                        Formulario TEXT NULL,
-                        ValoresAnteriores TEXT NULL,
-                        ValoresNuevos TEXT NULL,
-                        Fecha TEXT NOT NULL,
-                        DireccionIp TEXT NULL
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'PreRegistros')
+                BEGIN
+                    CREATE TABLE PreRegistros (
+                        Id INT IDENTITY(1,1) PRIMARY KEY,
+                        Nombre NVARCHAR(250) NOT NULL,
+                        PrimerNombre NVARCHAR(100) NULL,
+                        SegundoNombre NVARCHAR(100) NULL,
+                        PrimerApellido NVARCHAR(100) NULL,
+                        SegundoApellido NVARCHAR(100) NULL,
+                        Cedula NVARCHAR(50) NULL,
+                        Email NVARCHAR(200) NOT NULL,
+                        PasswordPlana NVARCHAR(250) NOT NULL,
+                        Rol NVARCHAR(50) NOT NULL DEFAULT 'Cliente',
+                        Telefono NVARCHAR(50) NULL,
+                        Direccion NVARCHAR(300) NULL,
+                        RedesSociales NVARCHAR(300) NULL,
+                        LimiteCredito DECIMAL(18,2) NOT NULL DEFAULT 50000,
+                        FotoBase64 NVARCHAR(MAX) NULL,
+                        TokenValidacion NVARCHAR(200) NOT NULL,
+                        TokenCancelacion NVARCHAR(200) NOT NULL,
+                        FechaCreacion DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                        FechaExpiracion DATETIME2 NOT NULL,
+                        Estado NVARCHAR(50) NOT NULL DEFAULT 'Pendiente'
                     );
-                ");
-            } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Auditorias ADD COLUMN Formulario TEXT NULL;"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Auditorias ADD COLUMN UsuarioNombre TEXT NULL;"); } catch { }
-            try { db.Database.ExecuteSqlRaw("ALTER TABLE Auditorias ADD COLUMN UsuarioRol TEXT NULL;"); } catch { }
+                END
+            ");
         }
 
         // Asegurar que el usuario 'Cliente de Paso' exista en la tabla Usuarios

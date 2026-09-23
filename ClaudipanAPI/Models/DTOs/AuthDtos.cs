@@ -155,3 +155,22 @@ public class ResetPasswordDto
     public string Token { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
 }
+
+public class ConfirmPreRegisterDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+}
+
+public class CancelPreRegisterDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+}
+
+public class PreRegisterResponseDto
+{
+    public string Email { get; set; } = string.Empty;
+    public string Nombre { get; set; } = string.Empty;
+    public string Mensaje { get; set; } = string.Empty;
+}

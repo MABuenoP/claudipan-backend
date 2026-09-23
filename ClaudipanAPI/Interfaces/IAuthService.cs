@@ -18,4 +18,7 @@ public interface IAuthService
     Task<ApiResponse<CheckFieldResponseDto>> CheckFieldAsync(CheckFieldDto request);
     Task<ApiResponse<bool>> ForgotPasswordAsync(ForgotPasswordDto request);
     Task<ApiResponse<bool>> ResetPasswordAsync(ResetPasswordDto request);
+    Task<ApiResponse<PreRegisterResponseDto>> PreRegisterAsync(RegisterRequestDto request);
+    Task<ApiResponse<AuthResponseDto>> ConfirmPreRegisterAsync(ConfirmPreRegisterDto request);
+    Task<ApiResponse<bool>> CancelPreRegisterAsync(CancelPreRegisterDto request);
 }
