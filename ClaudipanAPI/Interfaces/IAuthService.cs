@@ -21,4 +21,8 @@ public interface IAuthService
     Task<ApiResponse<PreRegisterResponseDto>> PreRegisterAsync(RegisterRequestDto request);
     Task<ApiResponse<AuthResponseDto>> ConfirmPreRegisterAsync(ConfirmPreRegisterDto request);
     Task<ApiResponse<bool>> CancelPreRegisterAsync(CancelPreRegisterDto request);
+    Task<ApiResponse<List<PreRegistroDto>>> GetAllPreRegistrosAsync();
+    Task<ApiResponse<PreRegistroDto>> UpdatePreRegistroAsync(int id, UpdatePreRegistroDto request);
+    Task<ApiResponse<UsuarioAdminDto>> ValidatePreRegistroAdminAsync(int id);
+    Task<ApiResponse<bool>> CancelPreRegistroAdminAsync(int id);
 }

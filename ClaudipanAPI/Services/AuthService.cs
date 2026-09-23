@@ -708,27 +708,66 @@ public class AuthService : IAuthService
 
         var preregistro = await _context.PreRegistros
             .FirstOrDefaultAsync(p => p.Email.ToLower() == emailLower 
-                                   && p.TokenValidacion == request.Token.Trim() 
-                                   && p.Estado == "Pendiente");
+                                   && p.TokenValidacion == request.Token.Trim());
 
         if (preregistro == null)
         {
-            return ApiResponse<AuthResponseDto>.Fail("El enlace de validación es inválido, ya fue utilizado o ha sido cancelado.");
+            return ApiResponse<AuthResponseDto>.Fail("El enlace de validación es inválido o no existe.");
         }
 
-        if (DateTime.UtcNow > preregistro.FechaExpiracion)
+        if (preregistro.Estado == "Cancelado")
+        {
+            return ApiResponse<AuthResponseDto>.Fail("Esta solicitud de registro fue cancelada previamente.");
+        }
+
+        if (preregistro.Estado == "Expirado" || DateTime.UtcNow > preregistro.FechaExpiracion)
         {
             preregistro.Estado = "Expirado";
             await _context.SaveChangesAsync();
             return ApiResponse<AuthResponseDto>.Fail("El enlace de validación ha expirado. Por favor realiza un nuevo registro.");
         }
 
-        // Verificar que no se haya registrado mientras tanto
-        if (await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == emailLower))
+        // Si ya fue validado, devolver la sesión del usuario existente
+        if (preregistro.Estado == "Validado" || await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == emailLower))
         {
             preregistro.Estado = "Validado";
             await _context.SaveChangesAsync();
-            return ApiResponse<AuthResponseDto>.Fail("El correo ya se encuentra registrado y activo como usuario.");
+
+            var existingUser = await _context.Usuarios.FirstOrDefaultAsync(u => u.Email.ToLower() == emailLower);
+            if (existingUser != null)
+            {
+                var t = JwtHelper.GenerateToken(existingUser, _configuration);
+                var rt = JwtHelper.GenerateRefreshToken();
+                var exp = DateTime.UtcNow.AddMinutes(
+                    double.Parse(_configuration["JwtSettings:ExpirationInMinutes"] ?? "1440"));
+
+                existingUser.RefreshToken = rt;
+                existingUser.RefreshTokenExpiry = DateTime.UtcNow.AddDays(
+                    double.Parse(_configuration["JwtSettings:RefreshTokenExpirationInDays"] ?? "7"));
+                await _context.SaveChangesAsync();
+
+                return ApiResponse<AuthResponseDto>.Ok(new AuthResponseDto
+                {
+                    Id = existingUser.Id,
+                    Token = t,
+                    RefreshToken = rt,
+                    Expiracion = exp,
+                    Email = existingUser.Email,
+                    Nombre = existingUser.Nombre,
+                    PrimerNombre = existingUser.PrimerNombre,
+                    SegundoNombre = existingUser.SegundoNombre,
+                    PrimerApellido = existingUser.PrimerApellido,
+                    SegundoApellido = existingUser.SegundoApellido,
+                    Cedula = existingUser.Cedula,
+                    Rol = existingUser.Rol,
+                    Telefono = existingUser.Telefono,
+                    Direccion = existingUser.Direccion,
+                    RedesSociales = existingUser.RedesSociales,
+                    LimiteCredito = existingUser.LimiteCredito,
+                    DeudaActual = existingUser.DeudaActual,
+                    FotoBase64 = null
+                }, "¡Tu cuenta ya se encuentra validada y activa! Sesión iniciada.");
+            }
         }
 
         // Crear el usuario definitivo convirtiendo la contraseña en MD5 como se solicitó
@@ -813,17 +852,204 @@ public class AuthService : IAuthService
 
         var preregistro = await _context.PreRegistros
             .FirstOrDefaultAsync(p => p.Email.ToLower() == emailLower 
-                                   && p.TokenCancelacion == request.Token.Trim() 
-                                   && p.Estado == "Pendiente");
+                                   && p.TokenCancelacion == request.Token.Trim());
 
         if (preregistro == null)
         {
-            return ApiResponse<bool>.Fail("La solicitud no existe, ya fue cancelada o ya fue validada previamente.");
+            return ApiResponse<bool>.Fail("La solicitud no existe o el enlace es inválido.");
+        }
+
+        if (preregistro.Estado == "Cancelado")
+        {
+            return ApiResponse<bool>.Ok(true, "Tu registro ya se encuentra cancelado.");
+        }
+
+        if (preregistro.Estado == "Validado")
+        {
+            return ApiResponse<bool>.Fail("Esta cuenta ya fue validada y activada previamente como usuario activo.");
         }
 
         preregistro.Estado = "Cancelado";
         await _context.SaveChangesAsync();
 
         return ApiResponse<bool>.Ok(true, "Tu registro ha sido cancelado con éxito. Tus datos no fueron almacenados como usuario activo.");
+    }
+
+    public async Task<ApiResponse<List<PreRegistroDto>>> GetAllPreRegistrosAsync()
+    {
+        var list = await _context.PreRegistros
+            .OrderByDescending(p => p.FechaCreacion)
+            .Select(p => new PreRegistroDto
+            {
+                Id = p.Id,
+                Nombre = p.Nombre,
+                PrimerNombre = p.PrimerNombre,
+                SegundoNombre = p.SegundoNombre,
+                PrimerApellido = p.PrimerApellido,
+                SegundoApellido = p.SegundoApellido,
+                Cedula = p.Cedula,
+                Email = p.Email,
+                PasswordPlana = p.PasswordPlana,
+                Rol = p.Rol,
+                Telefono = p.Telefono,
+                Direccion = p.Direccion,
+                RedesSociales = p.RedesSociales,
+                LimiteCredito = p.LimiteCredito,
+                FotoBase64 = p.FotoBase64,
+                TokenValidacion = p.TokenValidacion,
+                TokenCancelacion = p.TokenCancelacion,
+                FechaCreacion = p.FechaCreacion,
+                FechaExpiracion = p.FechaExpiracion,
+                Estado = p.Estado
+            })
+            .ToListAsync();
+
+        return ApiResponse<List<PreRegistroDto>>.Ok(list);
+    }
+
+    public async Task<ApiResponse<PreRegistroDto>> UpdatePreRegistroAsync(int id, UpdatePreRegistroDto request)
+    {
+        var preregistro = await _context.PreRegistros.FindAsync(id);
+        if (preregistro == null)
+            return ApiResponse<PreRegistroDto>.Fail("Prerregistro no encontrado");
+
+        var fullName = BuildFullName(
+            request.PrimerNombre ?? preregistro.PrimerNombre,
+            request.SegundoNombre ?? preregistro.SegundoNombre,
+            request.PrimerApellido ?? preregistro.PrimerApellido,
+            request.SegundoApellido ?? preregistro.SegundoApellido,
+            request.Nombre ?? preregistro.Nombre
+        );
+
+        preregistro.PrimerNombre = request.PrimerNombre ?? preregistro.PrimerNombre;
+        preregistro.SegundoNombre = request.SegundoNombre ?? preregistro.SegundoNombre;
+        preregistro.PrimerApellido = request.PrimerApellido ?? preregistro.PrimerApellido;
+        preregistro.SegundoApellido = request.SegundoApellido ?? preregistro.SegundoApellido;
+        preregistro.Nombre = fullName;
+        preregistro.Cedula = request.Cedula ?? preregistro.Cedula;
+        if (!string.IsNullOrWhiteSpace(request.Email))
+            preregistro.Email = request.Email.Trim();
+        if (!string.IsNullOrWhiteSpace(request.PasswordPlana))
+            preregistro.PasswordPlana = request.PasswordPlana;
+        preregistro.Telefono = request.Telefono ?? preregistro.Telefono;
+        preregistro.Direccion = request.Direccion ?? preregistro.Direccion;
+        preregistro.RedesSociales = request.RedesSociales ?? preregistro.RedesSociales;
+        if (request.LimiteCredito.HasValue)
+            preregistro.LimiteCredito = request.LimiteCredito.Value;
+        if (request.FotoBase64 != null)
+            preregistro.FotoBase64 = request.FotoBase64;
+
+        await _context.SaveChangesAsync();
+
+        return ApiResponse<PreRegistroDto>.Ok(new PreRegistroDto
+        {
+            Id = preregistro.Id,
+            Nombre = preregistro.Nombre,
+            PrimerNombre = preregistro.PrimerNombre,
+            SegundoNombre = preregistro.SegundoNombre,
+            PrimerApellido = preregistro.PrimerApellido,
+            SegundoApellido = preregistro.SegundoApellido,
+            Cedula = preregistro.Cedula,
+            Email = preregistro.Email,
+            PasswordPlana = preregistro.PasswordPlana,
+            Rol = preregistro.Rol,
+            Telefono = preregistro.Telefono,
+            Direccion = preregistro.Direccion,
+            RedesSociales = preregistro.RedesSociales,
+            LimiteCredito = preregistro.LimiteCredito,
+            FotoBase64 = preregistro.FotoBase64,
+            TokenValidacion = preregistro.TokenValidacion,
+            TokenCancelacion = preregistro.TokenCancelacion,
+            FechaCreacion = preregistro.FechaCreacion,
+            FechaExpiracion = preregistro.FechaExpiracion,
+            Estado = preregistro.Estado
+        }, "Prerregistro actualizado exitosamente");
+    }
+
+    public async Task<ApiResponse<UsuarioAdminDto>> ValidatePreRegistroAdminAsync(int id)
+    {
+        var preregistro = await _context.PreRegistros.FindAsync(id);
+        if (preregistro == null)
+            return ApiResponse<UsuarioAdminDto>.Fail("Prerregistro no encontrado");
+
+        var emailLower = preregistro.Email.Trim().ToLower();
+
+        if (await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == emailLower))
+        {
+            preregistro.Estado = "Validado";
+            await _context.SaveChangesAsync();
+            return ApiResponse<UsuarioAdminDto>.Fail("El correo ya se encuentra registrado y activo en la tabla Usuarios.");
+        }
+
+        // Crear el usuario definitivo con contraseña convertida a hash MD5
+        var usuario = new Usuario
+        {
+            PrimerNombre = preregistro.PrimerNombre,
+            SegundoNombre = preregistro.SegundoNombre,
+            PrimerApellido = preregistro.PrimerApellido,
+            SegundoApellido = preregistro.SegundoApellido,
+            Nombre = preregistro.Nombre,
+            Cedula = preregistro.Cedula,
+            Email = preregistro.Email,
+            PasswordHash = PasswordHelper.HashMD5(preregistro.PasswordPlana),
+            Telefono = preregistro.Telefono,
+            Direccion = preregistro.Direccion,
+            RedesSociales = preregistro.RedesSociales,
+            Rol = string.IsNullOrWhiteSpace(preregistro.Rol) ? "Cliente" : preregistro.Rol,
+            LimiteCredito = preregistro.LimiteCredito,
+            DeudaActual = 0m,
+            Activo = true,
+            FechaCreacion = DateTime.UtcNow
+        };
+
+        _context.Usuarios.Add(usuario);
+        await _context.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(preregistro.FotoBase64))
+        {
+            _context.UsuarioFotos.Add(new UsuarioFoto
+            {
+                UsuarioId = usuario.Id,
+                FotoBase64 = preregistro.FotoBase64,
+                FechaActualizacion = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
+        }
+
+        preregistro.Estado = "Validado";
+        await _context.SaveChangesAsync();
+
+        return ApiResponse<UsuarioAdminDto>.Ok(new UsuarioAdminDto
+        {
+            Id = usuario.Id,
+            Nombre = usuario.Nombre,
+            PrimerNombre = usuario.PrimerNombre,
+            SegundoNombre = usuario.SegundoNombre,
+            PrimerApellido = usuario.PrimerApellido,
+            SegundoApellido = usuario.SegundoApellido,
+            Cedula = usuario.Cedula,
+            Email = usuario.Email,
+            Rol = usuario.Rol,
+            Telefono = usuario.Telefono,
+            Direccion = usuario.Direccion,
+            RedesSociales = usuario.RedesSociales,
+            LimiteCredito = usuario.LimiteCredito,
+            DeudaActual = usuario.DeudaActual,
+            Activo = usuario.Activo,
+            FechaCreacion = usuario.FechaCreacion,
+            FotoBase64 = preregistro.FotoBase64
+        }, "¡Prerregistro validado y usuario creado en la tabla Usuarios con contraseña MD5 exitosamente!");
+    }
+
+    public async Task<ApiResponse<bool>> CancelPreRegistroAdminAsync(int id)
+    {
+        var preregistro = await _context.PreRegistros.FindAsync(id);
+        if (preregistro == null)
+            return ApiResponse<bool>.Fail("Prerregistro no encontrado");
+
+        preregistro.Estado = "Cancelado";
+        await _context.SaveChangesAsync();
+
+        return ApiResponse<bool>.Ok(true, "Prerregistro cancelado exitosamente.");
     }
 }

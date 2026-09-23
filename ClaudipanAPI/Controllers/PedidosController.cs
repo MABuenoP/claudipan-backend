@@ -114,15 +114,13 @@ public class PedidosController : ControllerBase
     }
 
     [HttpPost("abonar")]
-    [Authorize(Roles = "Administrador,Gerente,Contable,Vendedor,Cliente")]
+    [Authorize(Roles = "Administrador,Gerente,Vendedor")]
     public async Task<IActionResult> RegistrarAbono([FromBody] RegistrarAbonoDto dto)
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var userId = GetCurrentUserId();
-
-        if (role == "Cliente" && userId.HasValue)
+        if (role == "Cliente")
         {
-            dto.UsuarioId = userId.Value;
+            return Forbid("Los clientes no tienen permitido registrar abonos directamente.");
         }
 
         var result = await _pedidoService.RegistrarAbonoClienteAsync(dto);

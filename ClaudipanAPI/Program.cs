@@ -187,6 +187,19 @@ app.MapGet("/404.html", async (HttpContext context, IConfiguration config) =>
     await context.Response.WriteAsync(ClaudipanAPI.Helpers.NotFoundPageHelper.Render(frontendUrl));
 });
 
+// Redirecciones directas al Frontend para confirmación y cancelación de registros
+app.MapGet("/confirmar-registro", (HttpContext context, IConfiguration config) =>
+{
+    var frontendUrl = (config["FrontendUrl"] ?? "https://claudipan.pedroleyvasenador26.org").TrimEnd('/');
+    return Results.Redirect($"{frontendUrl}/confirmar-registro{context.Request.QueryString}");
+});
+
+app.MapGet("/cancelar-registro", (HttpContext context, IConfiguration config) =>
+{
+    var frontendUrl = (config["FrontendUrl"] ?? "https://claudipan.pedroleyvasenador26.org").TrimEnd('/');
+    return Results.Redirect($"{frontendUrl}/cancelar-registro{context.Request.QueryString}");
+});
+
 app.MapFallback(async (HttpContext context, IConfiguration config) =>
 {
     context.Response.StatusCode = StatusCodes.Status404NotFound;

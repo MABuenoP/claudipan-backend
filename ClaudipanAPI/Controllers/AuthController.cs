@@ -208,6 +208,105 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Obtiene todos los prerregistros registrados en el sistema (Solo Administrador y Gerente).
+    /// </summary>
+    [HttpGet("preregistros")]
+    [Authorize(Roles = "Administrador,Gerente")]
+    public async Task<IActionResult> GetAllPreRegistros()
+    {
+        var result = await _authService.GetAllPreRegistrosAsync();
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Actualiza los datos de un prerregistro (Solo Administrador y Gerente).
+    /// </summary>
+    [HttpPost("preregistros/{id}/update")]
+    [HttpPut("preregistros/{id}")]
+    [Authorize(Roles = "Administrador,Gerente")]
+    public async Task<IActionResult> UpdatePreRegistro(int id, [FromBody] UpdatePreRegistroDto request)
+    {
+        var ip = GetClientIp();
+        var result = await _authService.UpdatePreRegistroAsync(id, request);
+        if (result.Success && result.Data != null)
+        {
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: null,
+                usuarioEmail: User.Identity?.Name ?? "Administrador",
+                accion: "Edición de Prerregistro",
+                tabla: "PreRegistros",
+                registroId: id.ToString(),
+                anterior: null,
+                nuevo: $"Prerregistro #{id} ({result.Data.Nombre}) actualizado por administración",
+                ip: ip,
+                formulario: "Administración de PreRegistros",
+                usuarioNombre: User.Identity?.Name,
+                usuarioRol: "Administrador/Gerente"
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
+    }
+
+    /// <summary>
+    /// Valida un prerregistro por parte de administración y lo inserta en Usuarios con clave MD5.
+    /// </summary>
+    [HttpPost("preregistros/{id}/validate")]
+    [Authorize(Roles = "Administrador,Gerente")]
+    public async Task<IActionResult> ValidatePreRegistroAdmin(int id)
+    {
+        var ip = GetClientIp();
+        var result = await _authService.ValidatePreRegistroAdminAsync(id);
+        if (result.Success && result.Data != null)
+        {
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: result.Data.Id,
+                usuarioEmail: User.Identity?.Name ?? "Administrador",
+                accion: "Aprobación Administrativa de Prerregistro",
+                tabla: "Usuarios",
+                registroId: result.Data.Id.ToString(),
+                anterior: $"PreRegistro #{id}",
+                nuevo: $"Usuario #{result.Data.Id} ({result.Data.Nombre} - {result.Data.Email}) aprobado y cargado en tabla Usuarios con contraseña MD5",
+                ip: ip,
+                formulario: "Administración de PreRegistros",
+                usuarioNombre: User.Identity?.Name,
+                usuarioRol: "Administrador/Gerente"
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
+    }
+
+    /// <summary>
+    /// Cancela un prerregistro por parte de administración.
+    /// </summary>
+    [HttpPost("preregistros/{id}/cancel")]
+    [Authorize(Roles = "Administrador,Gerente")]
+    public async Task<IActionResult> CancelPreRegistroAdmin(int id)
+    {
+        var ip = GetClientIp();
+        var result = await _authService.CancelPreRegistroAdminAsync(id);
+        if (result.Success)
+        {
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: null,
+                usuarioEmail: User.Identity?.Name ?? "Administrador",
+                accion: "Cancelación Administrativa de Prerregistro",
+                tabla: "PreRegistros",
+                registroId: id.ToString(),
+                anterior: null,
+                nuevo: $"Prerregistro #{id} cancelado por administración",
+                ip: ip,
+                formulario: "Administración de PreRegistros",
+                usuarioNombre: User.Identity?.Name,
+                usuarioRol: "Administrador/Gerente"
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
+    }
+
+    /// <summary>
     /// Renueva el token JWT usando un refresh token válido.
     /// </summary>
     [HttpPost("refresh-token")]

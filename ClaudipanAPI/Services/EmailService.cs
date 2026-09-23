@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Mail;
 using ClaudipanAPI.Interfaces;
 using ClaudipanAPI.Models.Entities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Serilog;
 
@@ -10,10 +11,47 @@ namespace ClaudipanAPI.Services;
 public class EmailService : IEmailService
 {
     private readonly IConfiguration _configuration;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
-    public EmailService(IConfiguration configuration)
+    public EmailService(IConfiguration configuration, IHttpContextAccessor? httpContextAccessor = null)
     {
         _configuration = configuration;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    /// <summary>
+    /// Detecta dinámicamente la URL base del Frontend (localhost en desarrollo o dominio en producción)
+    /// </summary>
+    private string GetFrontendBaseUrl()
+    {
+        try
+        {
+            var req = _httpContextAccessor?.HttpContext?.Request;
+            if (req != null)
+            {
+                var origin = req.Headers["Origin"].ToString();
+                if (!string.IsNullOrWhiteSpace(origin))
+                {
+                    return origin.TrimEnd('/');
+                }
+
+                var referer = req.Headers["Referer"].ToString();
+                if (!string.IsNullOrWhiteSpace(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri))
+                {
+                    return $"{refUri.Scheme}://{refUri.Authority}";
+                }
+            }
+        }
+        catch
+        {
+            // Fallback en caso de excepciones al leer contexto HTTP
+        }
+
+        var configured = Environment.GetEnvironmentVariable("FRONTEND_URL") 
+            ?? _configuration["FrontendUrl"] 
+            ?? "https://claudipan.pedroleyvasenador26.org";
+
+        return configured.TrimEnd('/');
     }
 
     public async Task<bool> SendPasswordResetEmailAsync(string toEmail, string userName, string temporaryPassword, string resetToken)
@@ -42,11 +80,8 @@ public class EmailService : IEmailService
                 ?? _configuration["EmailSettings:DisplayName"] 
                 ?? "Claudipan 2026";
 
-            var frontendBaseUrl = Environment.GetEnvironmentVariable("FRONTEND_URL") 
-                ?? _configuration["FrontendUrl"] 
-                ?? "https://claudipan.pedroleyvasenador26.org";
-
-            var activationUrl = $"{frontendBaseUrl.TrimEnd('/')}/reset-password?token={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(toEmail)}";
+            var frontendBaseUrl = GetFrontendBaseUrl();
+            var activationUrl = $"{frontendBaseUrl}/reset-password?token={Uri.EscapeDataString(resetToken)}&email={Uri.EscapeDataString(toEmail)}";
 
             var mail = new MailMessage
             {
@@ -70,52 +105,71 @@ public class EmailService : IEmailService
     <tr>
       <td align=""center"">
         <!-- Main Card -->
-        <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""max-width: 580px; background-color: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(180, 83, 9, 0.1); border: 1px solid #fde68a;"">
-          <!-- Header Banner -->
+        <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(120, 53, 15, 0.12); border: 1px solid #e7e5e4;"">
+          
+          <!-- Header Banner (Solid Dark Brown Background) -->
           <tr>
-            <td style=""background: linear-gradient(135deg, #78350f 0%, #b45309 50%, #d97706 100%); padding: 36px 30px; text-align: center; color: #ffffff;"">
-              <div style=""display: inline-block; background-color: rgba(255,255,255,0.15); padding: 10px 18px; border-radius: 9999px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.25);"">
-                <span style=""font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;"">🥐 Claudipan Artesanal 🥖</span>
+            <td align=""center"" bgcolor=""#78350f"" style=""background-color: #78350f; padding: 36px 24px; text-align: center;"">
+              <div style=""display: inline-block; background-color: #92400e; padding: 8px 18px; border-radius: 9999px; margin-bottom: 12px; border: 1px solid #b45309;"">
+                <span style=""font-size: 13px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef3c7;"">🥐 Claudipan Artesanal 🥖</span>
               </div>
-              <h1 style=""margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;"">Recuperación de Contraseña</h1>
-              <p style=""margin: 8px 0 0; font-size: 14px; opacity: 0.9;"">Panadería & Pastelería SENA ADSO</p>
+              <h1 style=""margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; color: #ffffff !important;"">Recuperación de Contraseña</h1>
+              <p style=""margin: 8px 0 0; font-size: 14px; color: #fde68a !important; font-weight: 500;"">Panadería & Pastelería SENA ADSO</p>
             </td>
           </tr>
 
           <!-- Body Content -->
           <tr>
-            <td style=""padding: 36px 32px;"">
+            <td style=""padding: 32px 28px; background-color: #ffffff;"">
               <p style=""margin: 0 0 16px; font-size: 17px; font-weight: 700; color: #1c1917;"">
                 Hola, <span style=""color: #b45309;"">{WebUtility.HtmlEncode(userName)}</span> 👋
               </p>
-              <p style=""margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #57534e;"">
+              <p style=""margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #44403c;"">
                 Hemos recibido una solicitud para restablecer la contraseña de acceso a tu cuenta de Claudipan asociada al correo <strong>{WebUtility.HtmlEncode(toEmail)}</strong>.
               </p>
 
               <!-- Temporary Password Box -->
-              <div style=""background: #fffbeb; border: 2px dashed #f59e0b; border-radius: 14px; padding: 20px; text-align: center; margin: 24px 0;"">
-                <span style=""display: block; font-size: 11px; font-weight: 700; color: #92400e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;"">
-                  Tu Nueva Contraseña Asignada
-                </span>
-                <span style=""display: inline-block; font-size: 28px; font-weight: 900; letter-spacing: 4px; color: #78350f; font-family: 'Consolas', 'Courier New', monospace; background: #ffffff; padding: 8px 24px; border-radius: 8px; border: 1px solid #fde68a;"">
-                  {WebUtility.HtmlEncode(temporaryPassword)}
-                </span>
-                <span style=""display: block; font-size: 12px; color: #b45309; margin-top: 8px; font-style: italic;"">
-                  Guarda esta contraseña temporal para iniciar sesión una vez activada.
-                </span>
-              </div>
+              <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""background-color: #fffbeb; border: 2px dashed #d97706; border-radius: 12px; margin: 20px 0;"">
+                <tr>
+                  <td align=""center"" style=""padding: 20px 16px;"">
+                    <span style=""display: block; font-size: 11px; font-weight: 800; color: #92400e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;"">
+                      Tu Nueva Contraseña Asignada
+                    </span>
+                    <div style=""display: inline-block; background-color: #451a03; padding: 10px 24px; border-radius: 8px; border: 2px solid #b45309;"">
+                      <span style=""font-size: 24px; font-weight: 900; letter-spacing: 3px; color: #ffffff !important; font-family: 'Consolas', 'Courier New', monospace;"">
+                        {WebUtility.HtmlEncode(temporaryPassword)}
+                      </span>
+                    </div>
+                    <span style=""display: block; font-size: 12px; color: #78350f; margin-top: 10px; font-weight: 600;"">
+                      Guarda esta contraseña temporal para iniciar sesión una vez activada.
+                    </span>
+                  </td>
+                </tr>
+              </table>
 
               <!-- Instructions -->
-              <p style=""margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #57534e;"">
-                Para que esta nueva contraseña surta efecto y reemplace tu clave anterior, debes confirmarla presionando el siguiente botón de activación seguro:
+              <p style=""margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #44403c;"">
+                Para que esta nueva contraseña surta efecto y reemplace tu clave anterior, debes confirmarla presionando el siguiente botón:
               </p>
 
-              <!-- CTA Button -->
-              <div style=""text-align: center; margin: 30px 0;"">
-                <a href=""{activationUrl}"" target=""_blank"" style=""display: inline-block; background: linear-gradient(135deg, #d97706 0%, #b45309 100%); color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 800; padding: 16px 36px; border-radius: 14px; box-shadow: 0 6px 16px rgba(180, 83, 9, 0.35); text-transform: uppercase; letter-spacing: 0.5px;"">
-                  🚀 Activar mi nueva contraseña
+              <!-- Bulletproof Button -->
+              <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" align=""center"" style=""margin: 0 auto; border-collapse: separate;"">
+                <tr>
+                  <td align=""center"" bgcolor=""#b45309"" style=""background-color: #b45309; border-radius: 12px; padding: 0;"">
+                    <a href=""{activationUrl}"" target=""_blank"" style=""display: block; background-color: #b45309; color: #ffffff !important; font-size: 16px; font-weight: 800; font-family: 'Segoe UI', Arial, sans-serif; text-decoration: none; padding: 16px 36px; border-radius: 12px; border: 1px solid #d97706; letter-spacing: 0.5px;"">
+                      <span style=""color: #ffffff !important; text-decoration: none;"">🥖 Activar Nueva Contraseña</span>
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Direct fallback link -->
+              <p style=""margin: 14px 0 0; font-size: 12px; color: #78716c; text-align: center; line-height: 1.4;"">
+                Si el botón no funciona, copia y pega este enlace en tu navegador:<br/>
+                <a href=""{activationUrl}"" target=""_blank"" style=""color: #b45309; font-weight: 700; text-decoration: underline; word-break: break-all;"">
+                  {activationUrl}
                 </a>
-              </div>
+              </p>
 
               <!-- Security Notice -->
               <div style=""background-color: #f5f5f4; border-radius: 10px; padding: 14px 18px; margin-top: 24px;"">
@@ -186,12 +240,9 @@ public class EmailService : IEmailService
                 ?? _configuration["EmailSettings:DisplayName"] 
                 ?? "Claudipan 2026";
 
-            var frontendBaseUrl = Environment.GetEnvironmentVariable("FRONTEND_URL") 
-                ?? _configuration["FrontendUrl"] 
-                ?? "https://claudipan.pedroleyvasenador26.org";
-
-            var confirmUrl = $"{frontendBaseUrl.TrimEnd('/')}/confirmar-registro?token={Uri.EscapeDataString(preregistro.TokenValidacion)}&email={Uri.EscapeDataString(preregistro.Email)}";
-            var cancelUrl = $"{frontendBaseUrl.TrimEnd('/')}/cancelar-registro?token={Uri.EscapeDataString(preregistro.TokenCancelacion)}&email={Uri.EscapeDataString(preregistro.Email)}";
+            var frontendBaseUrl = GetFrontendBaseUrl();
+            var confirmUrl = $"{frontendBaseUrl}/confirmar-registro?token={Uri.EscapeDataString(preregistro.TokenValidacion)}&email={Uri.EscapeDataString(preregistro.Email)}";
+            var cancelUrl = $"{frontendBaseUrl}/cancelar-registro?token={Uri.EscapeDataString(preregistro.TokenCancelacion)}&email={Uri.EscapeDataString(preregistro.Email)}";
 
             var mail = new MailMessage
             {
@@ -218,99 +269,130 @@ public class EmailService : IEmailService
     <tr>
       <td align=""center"">
         <!-- Main Card -->
-        <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""max-width: 620px; background-color: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(180, 83, 9, 0.12); border: 1px solid #fde68a;"">
+        <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""max-width: 620px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(120, 53, 15, 0.12); border: 1px solid #e7e5e4;"">
           
-          <!-- Header Banner -->
+          <!-- Header Banner (Solid Dark Brown #78350f - No washed out colors) -->
           <tr>
-            <td style=""background: linear-gradient(135deg, #78350f 0%, #b45309 50%, #d97706 100%); padding: 36px 30px; text-align: center; color: #ffffff;"">
-              <div style=""display: inline-block; background-color: rgba(255,255,255,0.18); padding: 8px 18px; border-radius: 9999px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.3);"">
-                <span style=""font-size: 13px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;"">🥖 Panadería & Pastelería Claudipan 🥐</span>
+            <td align=""center"" bgcolor=""#78350f"" style=""background-color: #78350f; padding: 36px 24px; text-align: center;"">
+              <div style=""display: inline-block; background-color: #92400e; padding: 8px 20px; border-radius: 9999px; margin-bottom: 12px; border: 1px solid #b45309;"">
+                <span style=""font-size: 13px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #fef3c7;"">🥖 Panadería & Pastelería Claudipan 🥐</span>
               </div>
-              <h1 style=""margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;"">¡Confirma tu Registro de Usuario!</h1>
-              <p style=""margin: 8px 0 0; font-size: 14px; opacity: 0.9;"">SENA ADSO • Pan Fresco y Calidad Artesanal</p>
+              <h1 style=""margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; color: #ffffff !important;"">¡Confirma tu Registro de Usuario!</h1>
+              <p style=""margin: 8px 0 0; font-size: 14px; color: #fde68a !important; font-weight: 500;"">SENA ADSO • Pan Fresco y Calidad Artesanal</p>
             </td>
           </tr>
 
           <!-- Body Content -->
           <tr>
-            <td style=""padding: 36px 32px;"">
+            <td style=""padding: 32px 28px; background-color: #ffffff;"">
               <p style=""margin: 0 0 16px; font-size: 18px; font-weight: 700; color: #1c1917;"">
                 ¡Hola, <span style=""color: #b45309;"">{WebUtility.HtmlEncode(preregistro.Nombre)}</span>! 👋
               </p>
-              <p style=""margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #57534e;"">
+              <p style=""margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #44403c;"">
                 Has completado el formulario de prerregistro en nuestra plataforma. A continuación encontrarás el resumen detallado de todos los datos que registraste, incluida tu contraseña de acceso:
               </p>
 
-              <!-- Data Summary Table -->
-              <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""background-color: #fffdfa; border: 1px solid #fde68a; border-radius: 12px; overflow: hidden; margin-bottom: 24px; font-size: 13px;"">
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; width: 38%; background-color: #fef3c7;"">Nombre Completo:</td>
-                  <td style=""padding: 10px 16px; color: #1c1917; font-weight: 600;"">{WebUtility.HtmlEncode(preregistro.Nombre)}</td>
-                </tr>
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Nombres y Apellidos:</td>
-                  <td style=""padding: 10px 16px; color: #44403c;"">{WebUtility.HtmlEncode(nombresDetalle)}</td>
-                </tr>
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Cédula / Documento:</td>
-                  <td style=""padding: 10px 16px; color: #44403c;"">{(string.IsNullOrWhiteSpace(preregistro.Cedula) ? "No especificada" : WebUtility.HtmlEncode(preregistro.Cedula))}</td>
-                </tr>
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Correo Electrónico:</td>
-                  <td style=""padding: 10px 16px; color: #44403c; font-weight: 600;"">{WebUtility.HtmlEncode(preregistro.Email)}</td>
-                </tr>
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Celular / Teléfono:</td>
-                  <td style=""padding: 10px 16px; color: #44403c;"">{(string.IsNullOrWhiteSpace(preregistro.Telefono) ? "No especificado" : WebUtility.HtmlEncode(preregistro.Telefono))}</td>
-                </tr>
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Dirección:</td>
-                  <td style=""padding: 10px 16px; color: #44403c;"">{(string.IsNullOrWhiteSpace(preregistro.Direccion) ? "No especificada" : WebUtility.HtmlEncode(preregistro.Direccion))}</td>
-                </tr>
-                <tr style=""border-bottom: 1px solid #fef3c7;"">
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Redes Sociales:</td>
-                  <td style=""padding: 10px 16px; color: #44403c;"">{(string.IsNullOrWhiteSpace(preregistro.RedesSociales) ? "No especificadas" : WebUtility.HtmlEncode(preregistro.RedesSociales))}</td>
+              <!-- Data Summary Table with High Contrast Colors -->
+              <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""background-color: #ffffff; border: 1px solid #fde68a; border-radius: 10px; overflow: hidden; margin-bottom: 24px; font-size: 13px;"">
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; width: 38%; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Nombre Completo:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #1c1917; font-weight: 600; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{WebUtility.HtmlEncode(preregistro.Nombre)}</td>
                 </tr>
                 <tr>
-                  <td style=""padding: 10px 16px; font-weight: 700; color: #92400e; background-color: #fef3c7;"">Cupo de Crédito:</td>
-                  <td style=""padding: 10px 16px; color: #15803d; font-weight: 700;"">$50.000 COP (Asignado)</td>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Nombres y Apellidos:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #44403c; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{WebUtility.HtmlEncode(nombresDetalle)}</td>
+                </tr>
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Cédula / Documento:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #44403c; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{(string.IsNullOrWhiteSpace(preregistro.Cedula) ? "No especificada" : WebUtility.HtmlEncode(preregistro.Cedula))}</td>
+                </tr>
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Correo Electrónico:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #1c1917; font-weight: 700; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{WebUtility.HtmlEncode(preregistro.Email)}</td>
+                </tr>
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Celular / Teléfono:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #44403c; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{(string.IsNullOrWhiteSpace(preregistro.Telefono) ? "No especificado" : WebUtility.HtmlEncode(preregistro.Telefono))}</td>
+                </tr>
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Dirección:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #44403c; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{(string.IsNullOrWhiteSpace(preregistro.Direccion) ? "No especificada" : WebUtility.HtmlEncode(preregistro.Direccion))}</td>
+                </tr>
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7; border-bottom: 1px solid #fde68a;"">Redes Sociales:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #44403c; background-color: #ffffff; border-bottom: 1px solid #fde68a;"">{(string.IsNullOrWhiteSpace(preregistro.RedesSociales) ? "No especificadas" : WebUtility.HtmlEncode(preregistro.RedesSociales))}</td>
+                </tr>
+                <tr>
+                  <td bgcolor=""#fef3c7"" style=""padding: 10px 16px; font-weight: 700; color: #78350f; background-color: #fef3c7;"">Cupo de Crédito:</td>
+                  <td bgcolor=""#ffffff"" style=""padding: 10px 16px; color: #15803d; font-weight: 800; background-color: #ffffff;"">${NumberToCurrency(preregistro.LimiteCredito)} COP (Asignado)</td>
                 </tr>
               </table>
 
-              <!-- Highlighted Password Box -->
-              <div style=""background: #fffbeb; border: 2px dashed #f59e0b; border-radius: 14px; padding: 20px; text-align: center; margin: 24px 0;"">
-                <span style=""display: block; font-size: 11px; font-weight: 800; color: #92400e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;"">
-                  🔑 Contraseña Creada por Ti
-                </span>
-                <span style=""display: inline-block; font-size: 24px; font-weight: 900; letter-spacing: 3px; color: #78350f; font-family: 'Consolas', 'Courier New', monospace; background: #ffffff; padding: 8px 24px; border-radius: 8px; border: 1px solid #fde68a;"">
-                  {WebUtility.HtmlEncode(preregistro.PasswordPlana)}
-                </span>
-                <p style=""margin: 10px 0 0; font-size: 11px; color: #78350f; line-height: 1.4;"">
-                  ⚠️ Por tu seguridad, guarda esta contraseña. Al confirmar tu cuenta, se transformará de manera segura e irreversible a hash MD5 en nuestra base de datos.
-                </p>
-              </div>
+              <!-- High Contrast Password Box -->
+              <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""background-color: #fffbeb; border: 2px dashed #d97706; border-radius: 12px; margin: 24px 0;"">
+                <tr>
+                  <td align=""center"" style=""padding: 20px 16px;"">
+                    <span style=""display: block; font-size: 11px; font-weight: 800; color: #92400e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;"">
+                      🔑 Contraseña Registrada por Ti
+                    </span>
+                    <div style=""display: inline-block; background-color: #451a03; padding: 10px 24px; border-radius: 8px; border: 2px solid #b45309;"">
+                      <span style=""font-size: 22px; font-weight: 900; letter-spacing: 3px; color: #ffffff !important; font-family: 'Consolas', 'Courier New', monospace;"">
+                        {WebUtility.HtmlEncode(preregistro.PasswordPlana)}
+                      </span>
+                    </div>
+                    <p style=""margin: 10px 0 0; font-size: 11px; color: #78350f; font-weight: 600; line-height: 1.4;"">
+                      ⚠️ Guarda esta clave. Al confirmar tu cuenta, se transformará de manera segura e irreversible a hash MD5 en nuestra base de datos.
+                    </p>
+                  </td>
+                </tr>
+              </table>
 
               <!-- Action Instructions -->
-              <p style=""margin: 24px 0 16px; font-size: 14px; line-height: 1.5; color: #44403c; text-align: center; font-weight: 600;"">
-                Para completar la activación o cancelar si no reconoces este registro, usa las siguientes opciones:
+              <p style=""margin: 24px 0 16px; font-size: 15px; line-height: 1.5; color: #1c1917; text-align: center; font-weight: 700;"">
+                Para completar la activación o cancelar el registro, selecciona una de las siguientes opciones:
               </p>
 
-              <!-- Buttons Container -->
-              <div style=""text-align: center; margin: 24px 0 28px;"">
-                <!-- Validation Button -->
-                <div style=""margin-bottom: 14px;"">
-                  <a href=""{confirmUrl}"" target=""_blank"" style=""display: inline-block; background: linear-gradient(135deg, #15803d 0%, #16a34a 100%); color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 800; padding: 15px 36px; border-radius: 12px; box-shadow: 0 4px 15px rgba(22, 163, 74, 0.35); letter-spacing: 0.3px;"">
-                    🥖 Validar y Confirmar Registro
-                  </a>
-                </div>
-
-                <!-- Cancel Button -->
-                <div>
-                  <a href=""{cancelUrl}"" target=""_blank"" style=""display: inline-block; background: #ffffff; color: #b91c1c; border: 1.5px solid #fca5a5; text-decoration: none; font-size: 13px; font-weight: 700; padding: 10px 24px; border-radius: 10px;"">
-                    ❌ Cancelar Registro
-                  </a>
-                </div>
+              <!-- Bulletproof Validation Button (Solid Green #15803d) -->
+              <div style=""text-align: center; margin: 20px 0 10px;"">
+                <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" align=""center"" style=""margin: 0 auto; border-collapse: separate;"">
+                  <tr>
+                    <td align=""center"" bgcolor=""#15803d"" style=""background-color: #15803d; border-radius: 12px; padding: 0;"">
+                      <a href=""{confirmUrl}"" target=""_blank"" style=""display: block; background-color: #15803d; color: #ffffff !important; font-size: 16px; font-weight: 800; font-family: 'Segoe UI', Arial, sans-serif; text-decoration: none; padding: 16px 36px; border-radius: 12px; border: 1px solid #16a34a; letter-spacing: 0.5px;"">
+                        <span style=""color: #ffffff !important; text-decoration: none;"">🥖 Validar y Confirmar Registro</span>
+                      </a>
+                    </td>
+                  </tr>
+                </table>
               </div>
+
+              <!-- Direct link fallback for validation -->
+              <p style=""margin: 8px 0 24px; font-size: 12px; color: #57534e; text-align: center; line-height: 1.4;"">
+                Si el botón no abre la página, haz clic directamente en este enlace:<br/>
+                <a href=""{confirmUrl}"" target=""_blank"" style=""color: #15803d; font-weight: 700; text-decoration: underline; word-break: break-all;"">
+                  {confirmUrl}
+                </a>
+              </p>
+
+              <!-- Divider -->
+              <div style=""border-top: 1px solid #e7e5e4; margin: 20px 0;""></div>
+
+              <!-- Bulletproof Cancel Button (Soft Red Background + Bold Red Border & Text) -->
+              <div style=""text-align: center; margin: 16px 0 10px;"">
+                <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" align=""center"" style=""margin: 0 auto; border-collapse: separate;"">
+                  <tr>
+                    <td align=""center"" bgcolor=""#fee2e2"" style=""background-color: #fee2e2; border-radius: 10px; border: 2px solid #ef4444; padding: 0;"">
+                      <a href=""{cancelUrl}"" target=""_blank"" style=""display: block; background-color: #fee2e2; color: #b91c1c !important; font-size: 14px; font-weight: 800; font-family: 'Segoe UI', Arial, sans-serif; text-decoration: none; padding: 12px 28px; border-radius: 10px;"">
+                        <span style=""color: #b91c1c !important; text-decoration: none;"">❌ Cancelar Registro</span>
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- Direct link fallback for cancel -->
+              <p style=""margin: 6px 0 20px; font-size: 11px; color: #78716c; text-align: center; line-height: 1.4;"">
+                Para anular la solicitud: <a href=""{cancelUrl}"" target=""_blank"" style=""color: #b91c1c; font-weight: 600; text-decoration: underline; word-break: break-all;"">{cancelUrl}</a>
+              </p>
 
               <!-- Notice Box -->
               <div style=""background: #f5f5f4; border-left: 4px solid #d97706; padding: 12px 16px; border-radius: 0 8px 8px 0; margin-top: 24px;"">
@@ -357,5 +439,10 @@ public class EmailService : IEmailService
             Log.Error(ex, "Failed to send pre-registration email to {Email}", preregistro.Email);
             return false;
         }
+    }
+
+    private static string NumberToCurrency(decimal amount)
+    {
+        return amount.ToString("N0", new System.Globalization.CultureInfo("es-CO"));
     }
 }
