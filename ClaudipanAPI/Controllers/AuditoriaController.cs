@@ -1,4 +1,6 @@
 using ClaudipanAPI.Interfaces;
+using ClaudipanAPI.Models.DTOs;
+using ClaudipanAPI.Models.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,6 +26,6 @@ public class AuditoriaController : ControllerBase
         [FromQuery] string? busqueda)
     {
         var result = await _auditoriaService.GetAllAsync(tabla, accion, formulario, busqueda);
-        return Ok(result);
+        return Ok(ApiResponse<IEnumerable<AuditoriaDto>>.Ok(result));
     }
 }
