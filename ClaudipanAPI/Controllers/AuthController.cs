@@ -58,6 +58,36 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Verifica si un campo (email, cédula, teléfono) ya existe en la base de datos.
+    /// </summary>
+    [HttpPost("check-field")]
+    public async Task<IActionResult> CheckField([FromBody] CheckFieldDto request)
+    {
+        var result = await _authService.CheckFieldAsync(request);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Genera contraseña temporal de 8 dígitos y envía correo con enlace/token de activación.
+    /// </summary>
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto request)
+    {
+        var result = await _authService.ForgotPasswordAsync(request);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Activa la nueva contraseña temporal si el token y correo coinciden.
+    /// </summary>
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto request)
+    {
+        var result = await _authService.ResetPasswordAsync(request);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
     /// Obtiene la información del perfil del usuario autenticado.
     /// </summary>
     [HttpGet("profile")]
@@ -75,7 +105,7 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Actualiza el perfil del usuario autenticado (incluye cambio de foto y datos personales).
     /// </summary>
-    [HttpPut("profile")]
+    [HttpPost("profile")]
     [Authorize]
     public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
     {
@@ -127,7 +157,7 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Actualiza rol, datos, foto o tope de crédito de un usuario (Solo Administrador y Gerente).
     /// </summary>
-    [HttpPut("users/{id}")]
+    [HttpPost("users/{id}")]
     [Authorize(Roles = "Administrador,Gerente")]
     public async Task<IActionResult> UpdateUserAdmin(int id, [FromBody] UpdateUsuarioAdminDto dto)
     {

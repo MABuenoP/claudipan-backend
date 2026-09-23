@@ -15,4 +15,7 @@ public interface IAuthService
     Task<ApiResponse<UsuarioAdminDto>> CreateUserAdminAsync(UpdateUsuarioAdminDto request);
     Task<ApiResponse<UsuarioAdminDto>> UpdateUserAdminAsync(int id, UpdateUsuarioAdminDto request);
     Task<ApiResponse<bool>> DeleteUserAdminAsync(int id);
+    Task<ApiResponse<CheckFieldResponseDto>> CheckFieldAsync(CheckFieldDto request);
+    Task<ApiResponse<bool>> ForgotPasswordAsync(ForgotPasswordDto request);
+    Task<ApiResponse<bool>> ResetPasswordAsync(ResetPasswordDto request);
 }

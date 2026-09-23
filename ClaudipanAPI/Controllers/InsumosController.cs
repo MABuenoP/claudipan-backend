@@ -41,7 +41,7 @@ public class InsumosController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    [HttpPut("{id}")]
+    [HttpPost("{id}")]
     [Authorize(Roles = "Administrador,Gerente,Panadero,Contable")]
     public async Task<IActionResult> Update(int id, [FromBody] InsumoUpdateDto dto)
     {

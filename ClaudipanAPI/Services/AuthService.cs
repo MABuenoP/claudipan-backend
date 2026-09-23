@@ -12,11 +12,20 @@ public class AuthService : IAuthService
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IEmailService _emailService;
 
-    public AuthService(AppDbContext context, IConfiguration configuration)
+    public AuthService(AppDbContext context, IConfiguration configuration, IEmailService emailService)
     {
         _context = context;
         _configuration = configuration;
+        _emailService = emailService;
+    }
+
+    private static string GenerateRandomPassword(int length = 8)
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        var random = new Random();
+        return new string(Enumerable.Repeat(chars, length).Select(s => s[random.Next(s.Length)]).ToArray());
     }
 
     private static string BuildFullName(string? primerNombre, string? segundoNombre, string? primerApellido, string? segundoApellido, string? fallbackNombre = null)
@@ -77,8 +86,17 @@ public class AuthService : IAuthService
 
     public async Task<ApiResponse<AuthResponseDto>> RegisterAsync(RegisterRequestDto request)
     {
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return ApiResponse<AuthResponseDto>.Fail("El correo es requerido");
+
         if (await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == request.Email.ToLower()))
-            return ApiResponse<AuthResponseDto>.Fail("El correo ya está registrado");
+            return ApiResponse<AuthResponseDto>.Fail("El correo electrónico ya se encuentra registrado");
+
+        if (!string.IsNullOrWhiteSpace(request.Cedula) && await _context.Usuarios.AnyAsync(u => u.Cedula != null && u.Cedula.Trim() == request.Cedula.Trim()))
+            return ApiResponse<AuthResponseDto>.Fail("El número de cédula ya se encuentra registrado");
+
+        if (!string.IsNullOrWhiteSpace(request.Telefono) && await _context.Usuarios.AnyAsync(u => u.Telefono != null && u.Telefono.Trim() == request.Telefono.Trim()))
+            return ApiResponse<AuthResponseDto>.Fail("El número de celular ya se encuentra registrado");
 
         var fullName = BuildFullName(request.PrimerNombre, request.SegundoNombre, request.PrimerApellido, request.SegundoApellido, request.Nombre);
 
@@ -96,7 +114,7 @@ public class AuthService : IAuthService
             Direccion = request.Direccion,
             RedesSociales = request.RedesSociales,
             Rol = "Cliente",
-            LimiteCredito = request.LimiteCredito ?? 500000m,
+            LimiteCredito = request.LimiteCredito ?? 50000m,
             DeudaActual = 0m,
             Activo = true,
             FechaCreacion = DateTime.UtcNow
@@ -502,5 +520,107 @@ public class AuthService : IAuthService
         u.Activo = false;
         await _context.SaveChangesAsync();
         return ApiResponse<bool>.Ok(true, "Usuario desactivado correctamente");
+    }
+
+    public async Task<ApiResponse<CheckFieldResponseDto>> CheckFieldAsync(CheckFieldDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Field) || string.IsNullOrWhiteSpace(request.Value))
+        {
+            return ApiResponse<CheckFieldResponseDto>.Ok(new CheckFieldResponseDto
+            {
+                Exists = false,
+                Message = "Campo o valor vacío"
+            });
+        }
+
+        var field = request.Field.Trim().ToLowerInvariant();
+        var val = request.Value.Trim();
+        bool exists = false;
+        string fieldLabel = field;
+
+        switch (field)
+        {
+            case "email":
+            case "correo":
+                fieldLabel = "correo electrónico";
+                exists = await _context.Usuarios.AnyAsync(u => u.Email.ToLower() == val.ToLower());
+                break;
+            case "cedula":
+            case "documento":
+            case "documentoidentidad":
+                fieldLabel = "número de cédula";
+                exists = await _context.Usuarios.AnyAsync(u => u.Cedula != null && u.Cedula.Trim() == val);
+                break;
+            case "telefono":
+            case "celular":
+                fieldLabel = "número de celular";
+                exists = await _context.Usuarios.AnyAsync(u => u.Telefono != null && u.Telefono.Trim() == val);
+                break;
+            default:
+                return ApiResponse<CheckFieldResponseDto>.Fail($"Campo '{request.Field}' no reconocido para verificación");
+        }
+
+        return ApiResponse<CheckFieldResponseDto>.Ok(new CheckFieldResponseDto
+        {
+            Exists = exists,
+            Message = exists ? $"El {fieldLabel} ya se encuentra registrado en Claudipan." : $"El {fieldLabel} está disponible."
+        });
+    }
+
+    public async Task<ApiResponse<bool>> ForgotPasswordAsync(ForgotPasswordDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return ApiResponse<bool>.Fail("Por favor ingresa un correo electrónico válido");
+
+        var usuario = await _context.Usuarios.FirstOrDefaultAsync(u => u.Email.ToLower() == request.Email.Trim().ToLower());
+        if (usuario == null)
+        {
+            return ApiResponse<bool>.Fail("No se encontró ningún usuario registrado con ese correo electrónico");
+        }
+
+        var tempPassword = GenerateRandomPassword(8);
+        var token = Guid.NewGuid().ToString("N");
+
+        usuario.PasswordResetToken = token;
+        usuario.PasswordResetExpiry = DateTime.UtcNow.AddHours(24);
+        usuario.PasswordResetHash = PasswordHelper.HashPassword(tempPassword);
+
+        await _context.SaveChangesAsync();
+
+        var sent = await _emailService.SendPasswordResetEmailAsync(usuario.Email, usuario.Nombre, tempPassword, token);
+        if (!sent)
+        {
+            return ApiResponse<bool>.Fail("No se pudo enviar el correo de recuperación. Por favor verifica la conexión o contacta a soporte.");
+        }
+
+        return ApiResponse<bool>.Ok(true, "Se ha enviado un correo con tu nueva contraseña y el enlace de activación.");
+    }
+
+    public async Task<ApiResponse<bool>> ResetPasswordAsync(ResetPasswordDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Token))
+            return ApiResponse<bool>.Fail("Token y correo son obligatorios");
+
+        var usuario = await _context.Usuarios.FirstOrDefaultAsync(u => u.Email.ToLower() == request.Email.Trim().ToLower());
+        if (usuario == null)
+            return ApiResponse<bool>.Fail("Usuario no encontrado");
+
+        if (string.IsNullOrEmpty(usuario.PasswordResetToken) || usuario.PasswordResetToken != request.Token.Trim())
+            return ApiResponse<bool>.Fail("El token de activación es inválido o ya ha sido utilizado");
+
+        if (usuario.PasswordResetExpiry == null || usuario.PasswordResetExpiry < DateTime.UtcNow)
+            return ApiResponse<bool>.Fail("El token de activación ha expirado. Por favor solicita uno nuevo.");
+
+        if (string.IsNullOrEmpty(usuario.PasswordResetHash))
+            return ApiResponse<bool>.Fail("No hay una nueva contraseña pendiente de activación");
+
+        usuario.PasswordHash = usuario.PasswordResetHash;
+        usuario.PasswordResetToken = null;
+        usuario.PasswordResetExpiry = null;
+        usuario.PasswordResetHash = null;
+
+        await _context.SaveChangesAsync();
+
+        return ApiResponse<bool>.Ok(true, "¡Contraseña activada exitosamente! Ya puedes iniciar sesión con tu nueva contraseña.");
     }
 }

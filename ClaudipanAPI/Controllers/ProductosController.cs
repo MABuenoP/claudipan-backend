@@ -63,7 +63,7 @@ public class ProductosController : ControllerBase
     /// <summary>
     /// Actualiza un producto existente (Administrador, Gerente, Panadero).
     /// </summary>
-    [HttpPut("{id}")]
+    [HttpPost("{id}")]
     [Authorize(Roles = "Administrador,Gerente,Panadero")]
     public async Task<IActionResult> Update(int id, [FromBody] ProductoUpdateDto dto)
     {

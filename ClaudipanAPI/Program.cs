@@ -78,6 +78,7 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 // Servicios de aplicación
+builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IProductoService, ProductoService>();
 builder.Services.AddScoped<ICategoriaService, CategoriaService>();
@@ -174,6 +175,40 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-
+// Asegurar columnas de recuperación de contraseña en tabla Usuarios
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        if (db.Database.IsSqlServer())
+        {
+            db.Database.ExecuteSqlRaw(@"
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Usuarios') AND name = 'PasswordResetToken')
+                BEGIN
+                    ALTER TABLE Usuarios ADD PasswordResetToken NVARCHAR(200) NULL;
+                END
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Usuarios') AND name = 'PasswordResetExpiry')
+                BEGIN
+                    ALTER TABLE Usuarios ADD PasswordResetExpiry DATETIME2 NULL;
+                END
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Usuarios') AND name = 'PasswordResetHash')
+                BEGIN
+                    ALTER TABLE Usuarios ADD PasswordResetHash NVARCHAR(500) NULL;
+                END
+            ");
+        }
+        else if (db.Database.IsSqlite())
+        {
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetToken TEXT NULL;"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetExpiry TEXT NULL;"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetHash TEXT NULL;"); } catch { }
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Warning("Aviso al verificar columnas de recuperación en Usuarios: {Message}", ex.Message);
+    }
+}
 
 app.Run();

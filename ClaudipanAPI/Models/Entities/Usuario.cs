@@ -20,6 +20,9 @@ public class Usuario
     public bool Activo { get; set; } = true;
     public string? RefreshToken { get; set; }
     public DateTime? RefreshTokenExpiry { get; set; }
+    public string? PasswordResetToken { get; set; }
+    public DateTime? PasswordResetExpiry { get; set; }
+    public string? PasswordResetHash { get; set; }
     public DateTime FechaCreacion { get; set; } = DateTime.UtcNow;
 
     public UsuarioFoto? Foto { get; set; }
