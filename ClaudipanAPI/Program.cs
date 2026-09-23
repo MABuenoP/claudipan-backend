@@ -177,6 +177,32 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+// Manejo unificado de 404 (NotFound) para rutas y archivos no habilitados
+app.MapFallback(async (HttpContext context, IConfiguration config) =>
+{
+    context.Response.StatusCode = StatusCodes.Status404NotFound;
+
+    var isApi = context.Request.Path.StartsWithSegments("/api");
+    var acceptsJson = context.Request.Headers.Accept.Any(a => a != null && a.Contains("application/json", StringComparison.OrdinalIgnoreCase));
+
+    if (isApi || acceptsJson)
+    {
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            success = false,
+            statusCode = 404,
+            message = "Upsss, estás tratando de ir a un archivo que no se encuentra. Usa nuestro enlace para regresarte a nuestra pagina de inicio y gracias por tu visita.",
+            inicioUrl = config["FrontendUrl"] ?? "/"
+        });
+        return;
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    var frontendUrl = config["FrontendUrl"] ?? "/";
+    await context.Response.WriteAsync(ClaudipanAPI.Helpers.NotFoundPageHelper.Render(frontendUrl));
+});
+
 // Asegurar columnas de recuperación de contraseña en tabla Usuarios
 using (var scope = app.Services.CreateScope())
 {
