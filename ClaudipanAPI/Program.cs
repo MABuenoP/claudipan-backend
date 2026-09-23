@@ -178,6 +178,22 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Manejo unificado de 404 (NotFound) para rutas y archivos no habilitados
+app.MapGet("/404", async (HttpContext context, IConfiguration config) =>
+{
+    context.Response.StatusCode = StatusCodes.Status404NotFound;
+    context.Response.ContentType = "text/html; charset=utf-8";
+    var frontendUrl = config["FrontendUrl"] ?? "/";
+    await context.Response.WriteAsync(ClaudipanAPI.Helpers.NotFoundPageHelper.Render(frontendUrl));
+});
+
+app.MapGet("/404.html", async (HttpContext context, IConfiguration config) =>
+{
+    context.Response.StatusCode = StatusCodes.Status404NotFound;
+    context.Response.ContentType = "text/html; charset=utf-8";
+    var frontendUrl = config["FrontendUrl"] ?? "/";
+    await context.Response.WriteAsync(ClaudipanAPI.Helpers.NotFoundPageHelper.Render(frontendUrl));
+});
+
 app.MapFallback(async (HttpContext context, IConfiguration config) =>
 {
     context.Response.StatusCode = StatusCodes.Status404NotFound;
