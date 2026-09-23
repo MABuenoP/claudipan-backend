@@ -2,6 +2,7 @@ using ClaudipanAPI.Data;
 using ClaudipanAPI.Helpers;
 using ClaudipanAPI.Interfaces;
 using ClaudipanAPI.Middleware;
+using ClaudipanAPI.Models.Entities;
 using ClaudipanAPI.Services;
 using DotNetEnv;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -91,6 +92,7 @@ builder.Services.AddScoped<IBajaService, BajaService>();
 builder.Services.AddScoped<IPedidoService, PedidoService>();
 builder.Services.AddScoped<IContabilidadService, ContabilidadService>();
 builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
+builder.Services.AddHttpContextAccessor();
 
 // AutoMapper
 builder.Services.AddAutoMapper(typeof(Program));
@@ -196,6 +198,47 @@ using (var scope = app.Services.CreateScope())
                 BEGIN
                     ALTER TABLE Usuarios ADD PasswordResetHash NVARCHAR(500) NULL;
                 END
+
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Pedidos') AND name = 'CodigoTicket')
+                BEGIN
+                    ALTER TABLE Pedidos ADD CodigoTicket NVARCHAR(50) NULL;
+                END
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Pedidos') AND name = 'MetodoEntrega')
+                BEGIN
+                    ALTER TABLE Pedidos ADD MetodoEntrega NVARCHAR(50) NOT NULL DEFAULT 'Mostrador';
+                END
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Pedidos') AND name = 'CostoEnvio')
+                BEGIN
+                    ALTER TABLE Pedidos ADD CostoEnvio DECIMAL(18,2) NOT NULL DEFAULT 0;
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Auditorias')
+                BEGIN
+                    CREATE TABLE Auditorias (
+                        Id INT IDENTITY(1,1) PRIMARY KEY,
+                        UsuarioId INT NULL,
+                        UsuarioNombre NVARCHAR(150) NULL,
+                        UsuarioEmail NVARCHAR(150) NOT NULL DEFAULT 'Sistema',
+                        UsuarioRol NVARCHAR(50) NULL,
+                        Accion NVARCHAR(100) NOT NULL,
+                        TablaAfectada NVARCHAR(100) NOT NULL,
+                        RegistroId NVARCHAR(100) NULL,
+                        Formulario NVARCHAR(150) NULL,
+                        ValoresAnteriores NVARCHAR(MAX) NULL,
+                        ValoresNuevos NVARCHAR(MAX) NULL,
+                        Fecha DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                        DireccionIp NVARCHAR(50) NULL
+                    );
+                END
+                ELSE
+                BEGIN
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Auditorias') AND name = 'Formulario')
+                        ALTER TABLE Auditorias ADD Formulario NVARCHAR(150) NULL;
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Auditorias') AND name = 'UsuarioNombre')
+                        ALTER TABLE Auditorias ADD UsuarioNombre NVARCHAR(150) NULL;
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Auditorias') AND name = 'UsuarioRol')
+                        ALTER TABLE Auditorias ADD UsuarioRol NVARCHAR(50) NULL;
+                END
             ");
         }
         else if (db.Database.IsSqlite())
@@ -203,11 +246,58 @@ using (var scope = app.Services.CreateScope())
             try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetToken TEXT NULL;"); } catch { }
             try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetExpiry TEXT NULL;"); } catch { }
             try { db.Database.ExecuteSqlRaw("ALTER TABLE Usuarios ADD COLUMN PasswordResetHash TEXT NULL;"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Pedidos ADD COLUMN CodigoTicket TEXT NULL;"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Pedidos ADD COLUMN MetodoEntrega TEXT DEFAULT 'Mostrador';"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Pedidos ADD COLUMN CostoEnvio REAL DEFAULT 0;"); } catch { }
+            try {
+                db.Database.ExecuteSqlRaw(@"
+                    CREATE TABLE IF NOT EXISTS Auditorias (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        UsuarioId INTEGER NULL,
+                        UsuarioNombre TEXT NULL,
+                        UsuarioEmail TEXT NOT NULL DEFAULT 'Sistema',
+                        UsuarioRol TEXT NULL,
+                        Accion TEXT NOT NULL,
+                        TablaAfectada TEXT NOT NULL,
+                        RegistroId TEXT NULL,
+                        Formulario TEXT NULL,
+                        ValoresAnteriores TEXT NULL,
+                        ValoresNuevos TEXT NULL,
+                        Fecha TEXT NOT NULL,
+                        DireccionIp TEXT NULL
+                    );
+                ");
+            } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Auditorias ADD COLUMN Formulario TEXT NULL;"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Auditorias ADD COLUMN UsuarioNombre TEXT NULL;"); } catch { }
+            try { db.Database.ExecuteSqlRaw("ALTER TABLE Auditorias ADD COLUMN UsuarioRol TEXT NULL;"); } catch { }
+        }
+
+        // Asegurar que el usuario 'Cliente de Paso' exista en la tabla Usuarios
+        if (!db.Usuarios.Any(u => u.Email == "clientedepaso@claudipan.com"))
+        {
+            db.Usuarios.Add(new Usuario
+            {
+                Nombre = "Cliente de Paso",
+                PrimerNombre = "Cliente",
+                PrimerApellido = "de Paso",
+                Email = "clientedepaso@claudipan.com",
+                PasswordHash = PasswordHelper.HashPassword("Paso123*"),
+                Rol = "Cliente",
+                Direccion = "Mostrador Panadería Claudipan - Cra 5 # 10-20",
+                Telefono = "3000000000",
+                LimiteCredito = 0m,
+                DeudaActual = 0m,
+                Activo = true,
+                FechaCreacion = DateTime.UtcNow
+            });
+            db.SaveChanges();
+            Log.Information("Usuario 'Cliente de Paso' creado exitosamente en BD");
         }
     }
     catch (Exception ex)
     {
-        Log.Warning("Aviso al verificar columnas de recuperación en Usuarios: {Message}", ex.Message);
+        Log.Warning("Aviso al verificar esquema y datos iniciales: {Message}", ex.Message);
     }
 }
 

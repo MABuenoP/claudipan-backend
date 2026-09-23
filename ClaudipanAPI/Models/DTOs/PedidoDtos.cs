@@ -16,6 +16,9 @@ public class PedidoDto
     public DateTime? FechaEntrega { get; set; }
     public decimal Total { get; set; }
     public decimal MontoFiado { get; set; }
+    public decimal CostoEnvio { get; set; } = 0m;
+    public string MetodoEntrega { get; set; } = "Mostrador"; // Mostrador, Domicilio
+    public string? CodigoTicket { get; set; }
     public string Estado { get; set; } = string.Empty;
     public string TipoPago { get; set; } = string.Empty; // Efectivo, Nequi, Transferencia, Tarjeta, Credito_Fiado
     public string EstadoPago { get; set; } = string.Empty;
@@ -30,11 +33,14 @@ public class PedidoCreateDto
 {
     public int? UsuarioId { get; set; }
     public bool EsInvitado { get; set; } = false;
+    public bool EsClienteDePaso { get; set; } = false;
     public string? InvitadoNombre { get; set; }
     public string? InvitadoEmail { get; set; }
     public string? InvitadoTelefono { get; set; }
     public string? InvitadoCedula { get; set; }
 
+    public string MetodoEntrega { get; set; } = "Mostrador"; // Mostrador, Domicilio
+    public decimal? CostoEnvio { get; set; }
     public DateTime? FechaEntrega { get; set; }
     public string? DireccionEntrega { get; set; }
     public string? Observaciones { get; set; }
@@ -43,6 +49,13 @@ public class PedidoCreateDto
     public string? ComprobanteBase64 { get; set; }
     public string? ReferenciaPago { get; set; }
     public List<DetallePedidoCreateDto> Detalles { get; set; } = new();
+}
+
+public class EntregarPedidoDto
+{
+    public string TipoPago { get; set; } = "Efectivo"; // Efectivo, Transferencia, Credito_Fiado
+    public string? ReferenciaPago { get; set; }
+    public string? Observaciones { get; set; }
 }
 
 public class DetallePedidoCreateDto

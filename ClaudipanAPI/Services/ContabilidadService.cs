@@ -21,7 +21,7 @@ public class ContabilidadService : IContabilidadService
     public async Task<ApiResponse<ResumenContableDto>> GetResumenContableAsync()
     {
         var pedidos = await _context.Pedidos
-            .Where(p => p.Estado != "Cancelado")
+            .Where(p => p.Estado == "Entregado")
             .ToListAsync();
 
         var totalVentas = pedidos.Sum(p => p.Total);
@@ -70,7 +70,7 @@ public class ContabilidadService : IContabilidadService
         var pedidosQuery = _context.Pedidos
             .Include(p => p.Detalles)
                 .ThenInclude(d => d.Producto)
-            .Where(p => p.Estado != "Cancelado");
+            .Where(p => p.Estado == "Entregado");
 
         var gastosQuery = _context.Gastos.AsQueryable();
         var bajasQuery = _context.BajasProductos.AsQueryable();

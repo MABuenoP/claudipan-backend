@@ -32,6 +32,9 @@ public class Pedido
     public string? ReferenciaPago { get; set; }
 
     public string? DireccionEntrega { get; set; }
+    public string MetodoEntrega { get; set; } = "Mostrador"; // Mostrador, Domicilio
+    public decimal CostoEnvio { get; set; } = 0m;
+    public string? CodigoTicket { get; set; }
     public string? Observaciones { get; set; }
 
     public ICollection<DetallePedido> Detalles { get; set; } = new List<DetallePedido>();

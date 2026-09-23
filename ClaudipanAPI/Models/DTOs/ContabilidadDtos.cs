@@ -51,10 +51,13 @@ public class AuditoriaDto
 {
     public int Id { get; set; }
     public int? UsuarioId { get; set; }
+    public string? UsuarioNombre { get; set; }
     public string UsuarioEmail { get; set; } = string.Empty;
+    public string? UsuarioRol { get; set; }
     public string Accion { get; set; } = string.Empty;
     public string TablaAfectada { get; set; } = string.Empty;
     public string? RegistroId { get; set; }
+    public string? Formulario { get; set; }
     public string? ValoresAnteriores { get; set; }
     public string? ValoresNuevos { get; set; }
     public DateTime Fecha { get; set; }

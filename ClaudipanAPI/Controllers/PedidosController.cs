@@ -73,6 +73,22 @@ public class PedidosController : ControllerBase
         return result.Success ? Ok(result) : NotFound(result);
     }
 
+    [HttpPost("{id}/entregar")]
+    [Authorize(Roles = "Administrador,Gerente,Vendedor")]
+    public async Task<IActionResult> Entregar(int id, [FromBody] EntregarPedidoDto dto)
+    {
+        var result = await _pedidoService.EntregarAsync(id, dto);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("{id}/editar")]
+    [Authorize(Roles = "Administrador,Gerente,Vendedor")]
+    public async Task<IActionResult> UpdatePedido(int id, [FromBody] PedidoCreateDto dto)
+    {
+        var result = await _pedidoService.UpdatePedidoAsync(id, dto);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpPost("{id}/cancelar")]
     [Authorize(Roles = "Administrador,Gerente,Vendedor,Contable")]
     public async Task<IActionResult> Cancelar(int id)

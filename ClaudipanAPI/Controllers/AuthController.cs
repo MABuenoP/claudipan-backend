@@ -14,8 +14,28 @@ namespace ClaudipanAPI.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IAuditoriaService _auditoriaService;
 
-    public AuthController(IAuthService authService) => _authService = authService;
+    public AuthController(IAuthService authService, IAuditoriaService auditoriaService)
+    {
+        _authService = authService;
+        _auditoriaService = auditoriaService;
+    }
+
+    private string GetClientIp()
+    {
+        if (Request.Headers.TryGetValue("X-Forwarded-For", out var fwd))
+        {
+            var ip = fwd.FirstOrDefault()?.Split(',')[0].Trim();
+            if (!string.IsNullOrEmpty(ip)) return ip;
+        }
+        if (Request.Headers.TryGetValue("CF-Connecting-IP", out var cf))
+        {
+            var ip = cf.FirstOrDefault()?.Trim();
+            if (!string.IsNullOrEmpty(ip)) return ip;
+        }
+        return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+    }
 
     private int? GetCurrentUserId()
     {
@@ -33,8 +53,43 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
     {
+        var ip = GetClientIp();
         var result = await _authService.LoginAsync(request);
-        return result.Success ? Ok(result) : Unauthorized(result);
+        if (result.Success && result.Data != null)
+        {
+            var u = result.Data;
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: u.Id,
+                usuarioEmail: u.Email,
+                accion: "Inicio de Sesión",
+                tabla: "Usuarios",
+                registroId: u.Id.ToString(),
+                anterior: null,
+                nuevo: $"Acceso concedido al sistema. Rol: {u.Rol}",
+                ip: ip,
+                formulario: "Formulario de Login",
+                usuarioNombre: u.Nombre,
+                usuarioRol: u.Rol
+            );
+            return Ok(result);
+        }
+        else
+        {
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: null,
+                usuarioEmail: request.Email ?? "Desconocido",
+                accion: "Intento Fallido de Login",
+                tabla: "Usuarios",
+                registroId: null,
+                anterior: null,
+                nuevo: $"Credenciales incorrectas: {result.Message}",
+                ip: ip,
+                formulario: "Formulario de Login",
+                usuarioNombre: null,
+                usuarioRol: null
+            );
+            return Unauthorized(result);
+        }
     }
 
     /// <summary>
@@ -43,8 +98,27 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequestDto request)
     {
+        var ip = GetClientIp();
         var result = await _authService.RegisterAsync(request);
-        return result.Success ? Ok(result) : BadRequest(result);
+        if (result.Success && result.Data != null)
+        {
+            var u = result.Data;
+            await _auditoriaService.RegistrarAccionAsync(
+                usuarioId: u.Id,
+                usuarioEmail: u.Email,
+                accion: "Registro de Usuario",
+                tabla: "Usuarios",
+                registroId: u.Id.ToString(),
+                anterior: null,
+                nuevo: $"Usuario registrado: {u.Nombre} ({u.Email}) con cupo asignado",
+                ip: ip,
+                formulario: "Formulario de Registro",
+                usuarioNombre: u.Nombre,
+                usuarioRol: u.Rol
+            );
+            return Ok(result);
+        }
+        return BadRequest(result);
     }
 
     /// <summary>

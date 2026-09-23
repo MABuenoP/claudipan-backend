@@ -18,17 +18,31 @@ public class AuditoriaService : IAuditoriaService
         _mapper = mapper;
     }
 
-    public async Task RegistrarAccionAsync(int? usuarioId, string usuarioEmail, string accion, string tabla, string? registroId, string? anterior = null, string? nuevo = null, string? ip = null)
+    public async Task RegistrarAccionAsync(
+        int? usuarioId, 
+        string usuarioEmail, 
+        string accion, 
+        string tabla, 
+        string? registroId, 
+        string? anterior = null, 
+        string? nuevo = null, 
+        string? ip = null,
+        string? formulario = null,
+        string? usuarioNombre = null,
+        string? usuarioRol = null)
     {
         try
         {
             var audit = new Auditoria
             {
                 UsuarioId = usuarioId,
+                UsuarioNombre = usuarioNombre,
                 UsuarioEmail = string.IsNullOrWhiteSpace(usuarioEmail) ? "Sistema" : usuarioEmail,
+                UsuarioRol = usuarioRol,
                 Accion = accion,
                 TablaAfectada = tabla,
                 RegistroId = registroId,
+                Formulario = formulario,
                 ValoresAnteriores = anterior,
                 ValoresNuevos = nuevo,
                 Fecha = DateTime.UtcNow,
@@ -44,17 +58,37 @@ public class AuditoriaService : IAuditoriaService
         }
     }
 
-    public async Task<IEnumerable<AuditoriaDto>> GetAllAsync(string? tabla = null, string? accion = null)
+    public async Task<IEnumerable<AuditoriaDto>> GetAllAsync(
+        string? tabla = null, 
+        string? accion = null,
+        string? formulario = null,
+        string? busqueda = null)
     {
         var query = _context.Auditorias.AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(tabla))
-            query = query.Where(a => a.TablaAfectada.Contains(tabla));
+            query = query.Where(a => a.TablaAfectada.ToLower().Contains(tabla.ToLower()));
 
         if (!string.IsNullOrWhiteSpace(accion))
             query = query.Where(a => a.Accion == accion);
 
-        var list = await query.OrderByDescending(a => a.Fecha).Take(200).ToListAsync();
+        if (!string.IsNullOrWhiteSpace(formulario))
+            query = query.Where(a => a.Formulario != null && a.Formulario.ToLower().Contains(formulario.ToLower()));
+
+        if (!string.IsNullOrWhiteSpace(busqueda))
+        {
+            var b = busqueda.ToLower();
+            query = query.Where(a => 
+                (a.UsuarioEmail != null && a.UsuarioEmail.ToLower().Contains(b)) ||
+                (a.UsuarioNombre != null && a.UsuarioNombre.ToLower().Contains(b)) ||
+                (a.DireccionIp != null && a.DireccionIp.ToLower().Contains(b)) ||
+                (a.RegistroId != null && a.RegistroId.ToLower().Contains(b)) ||
+                (a.Formulario != null && a.Formulario.ToLower().Contains(b)) ||
+                (a.ValoresNuevos != null && a.ValoresNuevos.ToLower().Contains(b))
+            );
+        }
+
+        var list = await query.OrderByDescending(a => a.Fecha).Take(500).ToListAsync();
         return _mapper.Map<IEnumerable<AuditoriaDto>>(list);
     }
 }

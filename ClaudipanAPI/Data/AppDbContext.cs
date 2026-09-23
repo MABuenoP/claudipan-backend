@@ -1,11 +1,21 @@
+using System.Security.Claims;
+using System.Text.Json;
 using ClaudipanAPI.Models.Entities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace ClaudipanAPI.Data;
 
 public class AppDbContext : DbContext
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, IHttpContextAccessor? httpContextAccessor = null) 
+        : base(options) 
+    {
+        _httpContextAccessor = httpContextAccessor;
+    }
 
     public DbSet<Usuario> Usuarios => Set<Usuario>();
     public DbSet<UsuarioFoto> UsuarioFotos => Set<UsuarioFoto>();
@@ -41,6 +51,7 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Pedido>().Property(p => p.Total).HasPrecision(18, 2);
         modelBuilder.Entity<Pedido>().Property(p => p.MontoFiado).HasPrecision(18, 2);
+        modelBuilder.Entity<Pedido>().Property(p => p.CostoEnvio).HasPrecision(18, 2);
         modelBuilder.Entity<DetallePedido>().Property(d => d.PrecioUnitario).HasPrecision(18, 2);
 
         modelBuilder.Entity<Insumo>().Property(i => i.StockActual).HasPrecision(18, 2);
@@ -170,5 +181,231 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Producto>().HasIndex(p => p.Nombre);
         modelBuilder.Entity<Usuario>().HasIndex(u => u.Email).IsUnique();
         modelBuilder.Entity<Proveedor>().HasIndex(p => p.Nit);
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var auditEntries = OnBeforeSaveChanges();
+        var result = await base.SaveChangesAsync(cancellationToken);
+        if (auditEntries.Count > 0)
+        {
+            await OnAfterSaveChangesAsync(auditEntries, cancellationToken);
+        }
+        return result;
+    }
+
+    private class InternalAuditEntry
+    {
+        public EntityEntry Entry { get; set; } = null!;
+        public string Tabla { get; set; } = string.Empty;
+        public string Accion { get; set; } = string.Empty;
+        public string? RegistroId { get; set; }
+        public Dictionary<string, object?> OldValues { get; } = new();
+        public Dictionary<string, object?> NewValues { get; } = new();
+        public List<PropertyEntry> TemporaryProperties { get; } = new();
+    }
+
+    private List<InternalAuditEntry> OnBeforeSaveChanges()
+    {
+        ChangeTracker.DetectChanges();
+        var auditEntries = new List<InternalAuditEntry>();
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.Entity is Auditoria || entry.State == EntityState.Detached || entry.State == EntityState.Unchanged)
+                continue;
+
+            var auditEntry = new InternalAuditEntry
+            {
+                Entry = entry,
+                Tabla = entry.Metadata.GetTableName() ?? entry.Entity.GetType().Name
+            };
+
+            switch (entry.State)
+            {
+                case EntityState.Added:
+                    auditEntry.Accion = "Crear";
+                    foreach (var prop in entry.Properties)
+                    {
+                        if (prop.Metadata.IsPrimaryKey())
+                        {
+                            if (prop.IsTemporary)
+                            {
+                                auditEntry.TemporaryProperties.Add(prop);
+                                continue;
+                            }
+                            auditEntry.RegistroId = prop.CurrentValue?.ToString();
+                        }
+                        auditEntry.NewValues[prop.Metadata.Name] = prop.CurrentValue;
+                    }
+                    auditEntries.Add(auditEntry);
+                    break;
+
+                case EntityState.Deleted:
+                    auditEntry.Accion = "Eliminar";
+                    foreach (var prop in entry.Properties)
+                    {
+                        if (prop.Metadata.IsPrimaryKey())
+                        {
+                            auditEntry.RegistroId = prop.OriginalValue?.ToString();
+                        }
+                        auditEntry.OldValues[prop.Metadata.Name] = prop.OriginalValue;
+                    }
+                    auditEntries.Add(auditEntry);
+                    break;
+
+                case EntityState.Modified:
+                    auditEntry.Accion = "Modificar";
+                    foreach (var prop in entry.Properties)
+                    {
+                        if (prop.Metadata.IsPrimaryKey())
+                        {
+                            auditEntry.RegistroId = prop.CurrentValue?.ToString();
+                            continue;
+                        }
+                        if (prop.IsModified)
+                        {
+                            auditEntry.OldValues[prop.Metadata.Name] = prop.OriginalValue;
+                            auditEntry.NewValues[prop.Metadata.Name] = prop.CurrentValue;
+                        }
+                    }
+                    auditEntries.Add(auditEntry);
+                    break;
+            }
+        }
+
+        return auditEntries;
+    }
+
+    private async Task OnAfterSaveChangesAsync(List<InternalAuditEntry> auditEntries, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var httpContext = _httpContextAccessor?.HttpContext;
+            var ip = GetClientIp(httpContext);
+            var (userId, userEmail, userName, userRole) = GetCurrentUser(httpContext);
+            var formulario = GetFormulario(httpContext);
+
+            foreach (var auditEntry in auditEntries)
+            {
+                foreach (var prop in auditEntry.TemporaryProperties)
+                {
+                    if (prop.Metadata.IsPrimaryKey())
+                    {
+                        auditEntry.RegistroId = prop.CurrentValue?.ToString();
+                        auditEntry.NewValues[prop.Metadata.Name] = prop.CurrentValue;
+                    }
+                }
+
+                if (auditEntry.OldValues.ContainsKey("PasswordHash")) auditEntry.OldValues["PasswordHash"] = "********";
+                if (auditEntry.NewValues.ContainsKey("PasswordHash")) auditEntry.NewValues["PasswordHash"] = "********";
+
+                TruncateBase64(auditEntry.OldValues);
+                TruncateBase64(auditEntry.NewValues);
+
+                var record = new Auditoria
+                {
+                    UsuarioId = userId,
+                    UsuarioNombre = userName,
+                    UsuarioEmail = userEmail,
+                    UsuarioRol = userRole,
+                    Accion = auditEntry.Accion,
+                    TablaAfectada = auditEntry.Tabla,
+                    RegistroId = auditEntry.RegistroId,
+                    Formulario = formulario,
+                    ValoresAnteriores = auditEntry.OldValues.Count > 0 ? JsonSerializer.Serialize(auditEntry.OldValues) : null,
+                    ValoresNuevos = auditEntry.NewValues.Count > 0 ? JsonSerializer.Serialize(auditEntry.NewValues) : null,
+                    Fecha = DateTime.UtcNow,
+                    DireccionIp = ip
+                };
+
+                Auditorias.Add(record);
+            }
+
+            await base.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Evitar que el registro de auditoría interrumpa la operación
+        }
+    }
+
+    private string GetClientIp(HttpContext? context)
+    {
+        if (context == null) return "127.0.0.1";
+        if (context.Request.Headers.TryGetValue("X-Forwarded-For", out var fwd))
+        {
+            var ip = fwd.FirstOrDefault()?.Split(',')[0].Trim();
+            if (!string.IsNullOrEmpty(ip)) return ip;
+        }
+        if (context.Request.Headers.TryGetValue("CF-Connecting-IP", out var cf))
+        {
+            var ip = cf.FirstOrDefault()?.Trim();
+            if (!string.IsNullOrEmpty(ip)) return ip;
+        }
+        return context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+    }
+
+    private (int? id, string email, string? nombre, string? rol) GetCurrentUser(HttpContext? context)
+    {
+        if (context?.User?.Identity?.IsAuthenticated != true)
+        {
+            return (null, "Invitado / Sistema", null, null);
+        }
+        var claims = context.User;
+        var idVal = claims.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? claims.FindFirst("nameid")?.Value
+            ?? claims.FindFirst("sub")?.Value;
+        int? id = int.TryParse(idVal, out var parsedId) ? parsedId : null;
+        var email = claims.FindFirst(ClaimTypes.Email)?.Value 
+            ?? claims.FindFirst("email")?.Value 
+            ?? "Sistema";
+        var nombre = claims.FindFirst(ClaimTypes.Name)?.Value 
+            ?? claims.FindFirst("nombre")?.Value;
+        var rol = claims.FindFirst(ClaimTypes.Role)?.Value 
+            ?? claims.FindFirst("role")?.Value;
+        return (id, email, nombre, rol);
+    }
+
+    private string GetFormulario(HttpContext? context)
+    {
+        if (context == null) return "Sistema Interno / Tarea";
+
+        if (context.Request.Headers.TryGetValue("X-Form-Origin", out var formHeader) && !string.IsNullOrWhiteSpace(formHeader))
+        {
+            return formHeader.ToString();
+        }
+
+        var path = context.Request.Path.Value?.ToLower() ?? "";
+
+        if (path.Contains("/api/auth/login")) return "Formulario de Login";
+        if (path.Contains("/api/auth/register")) return "Formulario de Registro";
+        if (path.Contains("/api/auth/reset-password")) return "Formulario de Recuperar Contraseña";
+        if (path.Contains("/api/auth/profile")) return "Formulario de Perfil de Usuario";
+        if (path.Contains("/api/productos")) return "Formulario de Productos (Admin Tablas)";
+        if (path.Contains("/api/categorias")) return "Formulario de Categorías (Admin Tablas)";
+        if (path.Contains("/api/usuarios")) return "Formulario de Usuarios (Admin Tablas)";
+        if (path.Contains("/api/insumos")) return "Formulario de Insumos (Producción & Stock)";
+        if (path.Contains("/api/produccion")) return "Módulo de Producción (Órdenes & Recetas)";
+        if (path.Contains("/api/pedidos") && path.Contains("entregar")) return "Módulo de Despacho de Pedidos";
+        if (path.Contains("/api/pedidos")) return "Carrito de Compras / Ventas";
+        if (path.Contains("/api/pos")) return "Caja Rápida POS";
+        if (path.Contains("/api/compras")) return "Formulario de Compras Proveedores";
+        if (path.Contains("/api/gastos")) return "Formulario de Servicios & Nómina";
+        if (path.Contains("/api/bajas")) return "Formulario de Bajas & Mermas";
+        if (path.Contains("/api/deudas")) return "Gestión de Crédito & Mis Deudas";
+
+        return $"Ruta: {context.Request.Method} {path}";
+    }
+
+    private void TruncateBase64(Dictionary<string, object?> dict)
+    {
+        foreach (var key in dict.Keys.ToList())
+        {
+            if (dict[key] is string s && s.Length > 200 && (key.ToLower().Contains("foto") || key.ToLower().Contains("base64") || key.ToLower().Contains("imagen") || key.ToLower().Contains("comprobante")))
+            {
+                dict[key] = $"[Imagen Base64 - {s.Length} caracteres]";
+            }
+        }
     }
 }

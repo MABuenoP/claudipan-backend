@@ -17,9 +17,13 @@ public class AuditoriaController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? tabla, [FromQuery] string? accion)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] string? tabla, 
+        [FromQuery] string? accion,
+        [FromQuery] string? formulario,
+        [FromQuery] string? busqueda)
     {
-        var result = await _auditoriaService.GetAllAsync(tabla, accion);
+        var result = await _auditoriaService.GetAllAsync(tabla, accion, formulario, busqueda);
         return Ok(result);
     }
 }
