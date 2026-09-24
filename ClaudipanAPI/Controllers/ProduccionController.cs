@@ -44,6 +44,14 @@ public class ProduccionController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
+    [HttpPost("recetas/{id}"), HttpPut("recetas/{id}")]
+    [Authorize(Roles = "Administrador,Gerente")]
+    public async Task<IActionResult> UpdateReceta(int id, [FromBody] RecetaUpdateDto dto)
+    {
+        var result = await _produccionService.UpdateRecetaAsync(id, dto);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpDelete("recetas/{id}")]
     [Authorize(Roles = "Administrador")]
     public async Task<IActionResult> DeleteReceta(int id)

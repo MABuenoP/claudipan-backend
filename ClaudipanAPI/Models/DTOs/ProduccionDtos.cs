@@ -41,6 +41,16 @@ public class DetalleRecetaCreateDto
     public string UnidadMedida { get; set; } = "Kg";
 }
 
+public class RecetaUpdateDto
+{
+    public int ProductoId { get; set; }
+    public string NombreReceta { get; set; } = string.Empty;
+    public string? Descripcion { get; set; }
+    public int RendimientoUnidades { get; set; } = 50;
+    public bool? Activo { get; set; }
+    public List<DetalleRecetaCreateDto> Detalles { get; set; } = new();
+}
+
 public class OrdenProduccionDto
 {
     public int Id { get; set; }

@@ -9,6 +9,7 @@ public interface IProduccionService
     Task<ApiResponse<List<RecetaProduccionDto>>> GetAllRecetasAsync();
     Task<ApiResponse<RecetaProduccionDto>> GetRecetaByIdAsync(int id);
     Task<ApiResponse<RecetaProduccionDto>> CreateRecetaAsync(RecetaCreateDto dto);
+    Task<ApiResponse<RecetaProduccionDto>> UpdateRecetaAsync(int id, RecetaUpdateDto dto);
     Task<ApiResponse<bool>> DeleteRecetaAsync(int id);
 
     // Pre-chequeo de insumos para Gerente / Administrador

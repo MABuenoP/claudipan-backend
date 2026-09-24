@@ -97,6 +97,65 @@ public class ProduccionService : IProduccionService
         return ApiResponse<RecetaProduccionDto>.Ok(_mapper.Map<RecetaProduccionDto>(receta), "Receta creada y costo base de producto actualizado");
     }
 
+    public async Task<ApiResponse<RecetaProduccionDto>> UpdateRecetaAsync(int id, RecetaUpdateDto dto)
+    {
+        var receta = await _context.RecetasProduccion
+            .Include(r => r.Detalles)
+            .FirstOrDefaultAsync(r => r.Id == id);
+
+        if (receta == null) return ApiResponse<RecetaProduccionDto>.Fail("Receta no encontrada");
+
+        var producto = await _context.Productos.FindAsync(dto.ProductoId);
+        if (producto == null) return ApiResponse<RecetaProduccionDto>.Fail("Producto no encontrado");
+
+        receta.ProductoId = dto.ProductoId;
+        receta.NombreReceta = dto.NombreReceta;
+        receta.Descripcion = dto.Descripcion;
+        receta.RendimientoUnidades = dto.RendimientoUnidades > 0 ? dto.RendimientoUnidades : 50;
+        if (dto.Activo.HasValue)
+        {
+            receta.Activo = dto.Activo.Value;
+        }
+
+        // Limpiar detalles anteriores y reasignar
+        _context.DetallesReceta.RemoveRange(receta.Detalles);
+        receta.Detalles.Clear();
+
+        decimal costoTotal = 0m;
+
+        foreach (var d in dto.Detalles)
+        {
+            var insumo = await _context.Insumos.FindAsync(d.InsumoId);
+            if (insumo != null)
+            {
+                costoTotal += d.CantidadNecesaria * insumo.CostoUnitario;
+            }
+
+            receta.Detalles.Add(new DetalleReceta
+            {
+                InsumoId = d.InsumoId,
+                CantidadNecesaria = d.CantidadNecesaria,
+                UnidadMedida = d.UnidadMedida
+            });
+        }
+
+        receta.CostoTotalInsumos = costoTotal;
+        receta.CostoUnitarioEstimado = receta.RendimientoUnidades > 0 ? (costoTotal / receta.RendimientoUnidades) : 0m;
+
+        // Actualizar el costo base del producto
+        producto.CostoBaseProduccion = receta.CostoUnitarioEstimado;
+
+        await _context.SaveChangesAsync();
+
+        await _context.Entry(receta).Reference(r => r.Producto).LoadAsync();
+        foreach (var det in receta.Detalles)
+        {
+            await _context.Entry(det).Reference(d => d.Insumo).LoadAsync();
+        }
+
+        return ApiResponse<RecetaProduccionDto>.Ok(_mapper.Map<RecetaProduccionDto>(receta), "Fórmula maestra actualizada y costo base recalculado");
+    }
+
     public async Task<ApiResponse<bool>> DeleteRecetaAsync(int id)
     {
         var receta = await _context.RecetasProduccion.FindAsync(id);
