@@ -109,9 +109,10 @@ public class ProduccionController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    // --- PASO 1: CARGAR INSUMOS (SOLO PANADERO Y ADMIN) ---
+    // --- PASO 1: CARGAR INSUMOS (PANADERO, ADMIN, GERENTE) ---
+    [HttpPost("ordenes/{id}/cargar-insumos")]
     [HttpPatch("ordenes/{id}/cargar-insumos")]
-    [Authorize(Roles = "Panadero,Administrador")]
+    [Authorize(Roles = "Panadero,Administrador,Gerente")]
     public async Task<IActionResult> CargarInsumos(int id, [FromBody] CargarInsumosDto? dto)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -121,9 +122,10 @@ public class ProduccionController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    // --- PASO 2: PASAR A HORNEANDO (SOLO PANADERO Y ADMIN) ---
+    // --- PASO 2: PASAR A HORNEANDO (PANADERO, ADMIN, GERENTE) ---
+    [HttpPost("ordenes/{id}/pasar-horneando")]
     [HttpPatch("ordenes/{id}/pasar-horneando")]
-    [Authorize(Roles = "Panadero,Administrador")]
+    [Authorize(Roles = "Panadero,Administrador,Gerente")]
     public async Task<IActionResult> PasarHorneando(int id, [FromBody] PasarHorneandoDto? dto)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -133,9 +135,9 @@ public class ProduccionController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    // --- PASO 3: FINALIZAR Y CUANTIFICAR (SOLO PANADERO Y ADMIN) ---
+    // --- PASO 3: FINALIZAR Y CUANTIFICAR (PANADERO, ADMIN, GERENTE) ---
     [HttpPost("ordenes/{id}/finalizar-cuantificar")]
-    [Authorize(Roles = "Panadero,Administrador")]
+    [Authorize(Roles = "Panadero,Administrador,Gerente")]
     public async Task<IActionResult> FinalizarYCuantificar(int id, [FromBody] CuantificarProduccionDto dto)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

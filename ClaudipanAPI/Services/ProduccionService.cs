@@ -398,7 +398,7 @@ public class ProduccionService : IProduccionService
         }
 
         orden.CostoInsumos = costoInsumosTotal;
-        orden.Estado = "Preparando";
+        orden.Estado = "En Proceso";
 
         var notas = new List<string>();
         if (!string.IsNullOrWhiteSpace(orden.Observaciones)) notas.Add(orden.Observaciones);
@@ -424,8 +424,8 @@ public class ProduccionService : IProduccionService
 
         return ApiResponse<OrdenProduccionDto>.Ok(resultDto, 
             deficitInsumos.Any() 
-                ? $"Insumos cargados y descontados. ¡Atención!: {deficitInsumos.Count} insumos giraron en negativo para compra urgente de Gerencia." 
-                : "Insumos cargados exitosamente. Orden en estado: Preparando masa.");
+                ? $"Insumos cargados y descontados. ¡Atención!: {deficitInsumos.Count} insumos giraron en negativo para compra urgente de Gerencia. Orden en proceso." 
+                : "Insumos cargados exitosamente. Orden en estado: En proceso.");
     }
 
     // --- PASO 2 (PANADERO): MASA A PUNTO -> PASAR A HORNEANDO ---
@@ -438,7 +438,7 @@ public class ProduccionService : IProduccionService
             .FirstOrDefaultAsync(o => o.Id == id);
 
         if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden no encontrada");
-        if (orden.Estado != "Preparando" && orden.Estado != "Pendiente")
+        if (orden.Estado != "Preparando" && orden.Estado != "Pendiente" && orden.Estado != "En Proceso")
             return ApiResponse<OrdenProduccionDto>.Fail($"La orden no está en preparación (Estado actual: '{orden.Estado}')");
 
         orden.Estado = "Horneando";
@@ -460,7 +460,7 @@ public class ProduccionService : IProduccionService
         return ApiResponse<OrdenProduccionDto>.Ok(resultDto, "Masa a punto confirmada. La orden ha pasado a fase de HORNEANDO.");
     }
 
-    // --- PASO 3 (PANADERO): FINALIZAR Y CUANTIFICAR CALIDAD (ÓPTIMOS, BUENAS Y MALAS CONDICIONES) ---
+    // --- PASO 3 (PANADERO / GERENTE / ADMIN): CARGAR PRODUCCIÓN Y CULMINAR LOTE ---
     public async Task<ApiResponse<OrdenProduccionDto>> FinalizarYCuantificarAsync(int id, int panaderoId, CuantificarProduccionDto dto)
     {
         var orden = await _context.OrdenesProduccion
@@ -470,7 +470,8 @@ public class ProduccionService : IProduccionService
             .FirstOrDefaultAsync(o => o.Id == id);
 
         if (orden == null) return ApiResponse<OrdenProduccionDto>.Fail("Orden no encontrada");
-        if (orden.Estado == "Entregada") return ApiResponse<OrdenProduccionDto>.Fail("Esta orden ya fue finalizada y entregada anteriormente.");
+        if (orden.Estado == "Terminado" || orden.Estado == "Entregada") 
+            return ApiResponse<OrdenProduccionDto>.Fail("Esta orden ya fue finalizada anteriormente.");
 
         var totalProducido = dto.CantOptima + dto.CantBuenasCondiciones + dto.CantMalasCondiciones;
         if (totalProducido <= 0)
@@ -482,65 +483,60 @@ public class ProduccionService : IProduccionService
         var totalAceptable = dto.CantOptima + dto.CantBuenasCondiciones;
         var malasCondiciones = dto.CantMalasCondiciones;
 
-        orden.CantidadProducida = totalProducido;
+        orden.CantidadProducida = totalAceptable;
         orden.FechaEntrega = DateTime.UtcNow;
-        orden.Estado = "Entregada";
+        orden.Estado = "Terminado";
 
-        // 1. Sumar panes aceptables al stock de producto terminado
+        // 1. Sumar unidades aceptables al inventario del producto en vitrina
         if (orden.Producto != null && totalAceptable > 0)
         {
             orden.Producto.Stock += totalAceptable;
             orden.Producto.Disponible = true;
         }
 
-        // 2. Procesar panes en mala condición (Transformación o Desecho)
+        // 2. Procesar pérdidas: registrar en bajas/mermas Y sumar a insumos del Pan de Transformación
         if (malasCondiciones > 0)
         {
-            if (dto.DestinoMalasCondiciones == "Transformacion" || string.IsNullOrWhiteSpace(dto.DestinoMalasCondiciones))
+            // Sumar al insumo de transformación (Miga / Pan de Transformación)
+            var insumoTransformacion = await ObtenerOCrearInsumoTransformacionAsync();
+            var kgTransformacion = malasCondiciones * 0.08m; // Aprox 80g por unidad
+            insumoTransformacion.StockActual += kgTransformacion;
+            insumoTransformacion.FechaActualizacion = DateTime.UtcNow;
+
+            // Registrar en bajas o mermas
+            var costoUnit = orden.Producto?.CostoBaseProduccion ?? 0m;
+            if (costoUnit <= 0 && orden.Producto != null) costoUnit = orden.Producto.Precio * 0.55m;
+
+            var baja = new BajaProducto
             {
-                // Sumar al insumo de transformación (Miga / Pan de Transformación)
-                var insumoTransformacion = await ObtenerOCrearInsumoTransformacionAsync();
-                
-                // Estimación: 1 pan de mala condición = aprox 0.08 Kg (80 gr) de pan de transformación
-                var kgTransformacion = malasCondiciones * 0.08m;
-                insumoTransformacion.StockActual += kgTransformacion;
-                insumoTransformacion.FechaActualizacion = DateTime.UtcNow;
+                ProductoId = orden.ProductoId,
+                Cantidad = malasCondiciones,
+                Motivo = "Transformacion",
+                CostoUnitario = costoUnit,
+                CostoPerdidaTotal = malasCondiciones * costoUnit,
+                FechaBaja = DateTime.UtcNow,
+                UsuarioId = (panaderoId > 0) ? panaderoId : orden.PanaderoUsuarioId,
+                Observaciones = $"[ORDEN {orden.CodigoOrden}] Merma de producción ({malasCondiciones} panes / {kgTransformacion:F2} Kg) recuperada para insumo '{insumoTransformacion.Nombre}'."
+            };
 
-                var notaTransf = $"[TRANSFORMACIÓN] {malasCondiciones} panes defectuosos ({kgTransformacion:F2} Kg) pasaron al inventario de Materia Prima para Harina de Pan y Pastas Negras.";
-                orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
-                    ? notaTransf 
-                    : $"{orden.Observaciones} | {notaTransf}";
-            }
-            else if (dto.DestinoMalasCondiciones == "Desecho")
-            {
-                // Registrar baja contable
-                var costoUnit = orden.Producto?.CostoBaseProduccion ?? 0m;
-                if (costoUnit <= 0 && orden.Producto != null) costoUnit = orden.Producto.Precio * 0.55m;
+            _context.BajasProductos.Add(baja);
 
-                var baja = new BajaProducto
-                {
-                    ProductoId = orden.ProductoId,
-                    Cantidad = malasCondiciones,
-                    Motivo = "Merma de Horneado / Desecho de Producción",
-                    CostoUnitario = costoUnit,
-                    CostoPerdidaTotal = malasCondiciones * costoUnit,
-                    FechaBaja = DateTime.UtcNow,
-                    UsuarioId = (panaderoId > 0) ? panaderoId : orden.PanaderoUsuarioId,
-                    Observaciones = $"Merma de orden {orden.CodigoOrden} ({malasCondiciones} unidades en mal estado descartadas)."
-                };
-
-                _context.BajasProductos.Add(baja);
-
-                var notaDesecho = $"[DESECHO / BAJA] {malasCondiciones} panes defectuosos registrados en bajas contables por pérdida de horneado (${baja.CostoPerdidaTotal:N0}).";
-                orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
-                    ? notaDesecho 
-                    : $"{orden.Observaciones} | {notaDesecho}";
-            }
+            var notaTransf = $"[PRODUCCIÓN / TRANSFORMACIÓN] {totalAceptable} unidades a vitrina | {malasCondiciones} pérdidas ({kgTransformacion:F2} Kg) sumadas al insumo '{insumoTransformacion.Nombre}' y registradas en bajas contables.";
+            orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
+                ? notaTransf 
+                : $"{orden.Observaciones} | {notaTransf}";
+        }
+        else
+        {
+            var notaAcept = $"[PRODUCCIÓN CULMINADA] {totalAceptable} unidades ingresadas a inventario de vitrina al 100% óptimas.";
+            orden.Observaciones = string.IsNullOrWhiteSpace(orden.Observaciones) 
+                ? notaAcept 
+                : $"{orden.Observaciones} | {notaAcept}";
         }
 
         if (!string.IsNullOrWhiteSpace(dto.Observaciones))
         {
-            orden.Observaciones += $" | Nota Panadero: {dto.Observaciones}";
+            orden.Observaciones += $" | Nota: {dto.Observaciones}";
         }
 
         await _context.SaveChangesAsync();
@@ -550,10 +546,10 @@ public class ProduccionService : IProduccionService
         resultDto.CantOptima = dto.CantOptima;
         resultDto.CantBuenasCondiciones = dto.CantBuenasCondiciones;
         resultDto.CantMalasCondiciones = dto.CantMalasCondiciones;
-        resultDto.DestinoMalasCondiciones = dto.DestinoMalasCondiciones;
+        resultDto.DestinoMalasCondiciones = "Transformacion";
 
         return ApiResponse<OrdenProduccionDto>.Ok(resultDto, 
-            $"¡Horneado culminado! Se ingresaron {totalAceptable} unidades al mostrador ({dto.CantOptima} óptimos, {dto.CantBuenasCondiciones} buenas condiciones) y {malasCondiciones} en destino: {dto.DestinoMalasCondiciones}.");
+            $"¡Producción culminada! Se ingresaron {totalAceptable} unidades a vitrina y {malasCondiciones} pérdidas registradas en bajas contables y sumadas al inventario de Pan de Transformación.");
     }
 
     public async Task<ApiResponse<OrdenProduccionDto>> IniciarOrdenAsync(int id)

@@ -57,7 +57,8 @@ public class AutoMapperProfile : Profile
         // Baja
         CreateMap<BajaProducto, BajaProductoDto>()
             .ForMember(dest => dest.ProductoNombre, opt => opt.MapFrom(src => src.Producto != null ? src.Producto.Nombre : string.Empty))
-            .ForMember(dest => dest.UsuarioNombre, opt => opt.MapFrom(src => src.Usuario != null ? src.Usuario.Nombre : string.Empty));
+            .ForMember(dest => dest.UsuarioNombre, opt => opt.MapFrom(src => src.Usuario != null ? src.Usuario.Nombre : string.Empty))
+            .ForMember(dest => dest.EsParaTransformar, opt => opt.MapFrom(src => src.Motivo == "Transformacion" || (src.Observaciones != null && src.Observaciones.Contains("[TRANSFORMACIÓN"))));
 
         // Pedido
         CreateMap<Pedido, PedidoDto>()

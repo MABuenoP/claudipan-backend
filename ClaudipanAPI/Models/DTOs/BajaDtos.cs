@@ -13,12 +13,15 @@ public class BajaProductoDto
     public int? UsuarioId { get; set; }
     public string? UsuarioNombre { get; set; }
     public string? Observaciones { get; set; }
+    public bool EsParaTransformar { get; set; }
 }
 
 public class BajaProductoCreateDto
 {
     public int ProductoId { get; set; }
     public int Cantidad { get; set; }
-    public string Motivo { get; set; } = "Vencimiento"; // Vencimiento, Danado, Averia, ProduccionDefectuosa
+    public string Motivo { get; set; } = "Vencimiento"; // Vencimiento, Danado, Averia, ProduccionDefectuosa, Transformacion
     public string? Observaciones { get; set; }
+    public bool EsParaTransformar { get; set; } = false;
+    public decimal? KilosTransformacion { get; set; }
 }
